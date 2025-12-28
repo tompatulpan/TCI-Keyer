@@ -42,7 +42,7 @@ Python application for controlling SunSDR radios via TCI (Transceiver Command In
 - D1 (PA04) → Dah paddle
 - GND → Common ground
 
-See [https://github.com/tompatulpan/duration-encoded-cw-protocol/blob/main/USB_HID/README.md](USB_HID) for detailed wiring.
+See [https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID/README.md](USB_HID) for detailed wiring.
 
 ## Software Requirements
 
