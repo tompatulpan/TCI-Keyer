@@ -33,6 +33,9 @@ class TCIClient:
         self.ready = False
         self.running = False
         
+        # State tracking (read from TCI server on connect)
+        self.drive_level = 0  # Drive level (%), set from server on connect
+        
         # Callbacks for events
         self.on_ready: Optional[Callable] = None
         self.on_disconnect: Optional[Callable] = None
@@ -235,3 +238,30 @@ class TCIClient:
             transmit: True for TX, False for RX
         """
         await self.set_trx(transmit)
+    
+    async def set_drive(self, level: int):
+        """
+        Set drive (power) level
+        
+        Args:
+            level: Drive level 0-100 (%)
+        """
+        level = max(0, min(100, level))
+        await self.send_command(f"DRIVE:{self.trx_number},{level}")
+    
+    def parse_drive_from_message(self, message: str):
+        """
+        Parse drive level from TCI message and update internal state
+        
+        Args:
+            message: TCI message string (e.g., "drive:0,50;")
+        """
+        if message.lower().startswith(f"drive:{self.trx_number},"):
+            try:
+                # Parse "drive:0,50;" -> 50
+                parts = message.rstrip(';').split(',')
+                if len(parts) >= 2:
+                    self.drive_level = int(parts[1])
+                    self.logger.debug(f"Drive level updated: {self.drive_level}%")
+            except (ValueError, IndexError):
+                pass

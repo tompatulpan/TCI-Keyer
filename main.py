@@ -221,8 +221,12 @@ class TCICWController:
         Args:
             message: TCI message string
         """
+        # Track drive level changes
+        if message.lower().startswith('drive:'):
+            self.tci_client.parse_drive_from_message(message)
+        
         # Log interesting messages
-        if message.startswith(('VFO:', 'MODULATION:', 'TRX:')):
+        if message.startswith(('VFO:', 'MODULATION:', 'TRX:', 'drive:')):
             self.logger.debug(f"TCI: {message}")
     
     async def _on_macro_send(self, key_name: str, message: str):
@@ -254,25 +258,29 @@ class TCICWController:
             previous_duration_ms: Duration of previous state in milliseconds
         
         Note: Sidetone is now handled directly in usb_paddle_handler for precise timing
+        Note: KEYER generates CW carrier but requires DRIVE + TRX to be set first
         """
         # Send to TCI
         if self.tci_client and self.tci_client.ready:
-            # Auto-PTT: Activate PTT on first key-down if enabled
-            if self.paddle_auto_ptt and key_down and not self.paddle_ptt_active:
-                # Cancel any pending PTT release
-                if self.paddle_ptt_release_task:
-                    self.paddle_ptt_release_task.cancel()
-                    self.paddle_ptt_release_task = None
-                
+            # Cancel any pending PTT release on new key activity
+            if self.paddle_ptt_release_task and key_down:
+                self.paddle_ptt_release_task.cancel()
+                self.paddle_ptt_release_task = None
+            
+            # On first key-down, setup DRIVE and TRX
+            if key_down and not self.paddle_ptt_active:
+                # Set drive level (use the level read from ExpertSDR3 at startup)
+                await self.tci_client.set_drive(self.tci_client.drive_level)
+                # Enable TX mode
                 await self.tci_client.set_ptt(True)
                 self.paddle_ptt_active = True
-                self.logger.debug("Paddle PTT activated")
+                self.logger.debug(f"Paddle TX enabled (drive={self.tci_client.drive_level}%)")
             
-            # Send keyer command
+            # Send KEYER command (generates CW carrier when TRX is active)
             await self.tci_client.send_keyer(key_down, previous_duration_ms)
             
-            # Auto-PTT: Schedule PTT release after key-up with hangtime
-            if self.paddle_auto_ptt and not key_down and self.paddle_ptt_active:
+            # Schedule PTT release after key-up with hangtime
+            if not key_down and self.paddle_ptt_active:
                 # Cancel any previous release task
                 if self.paddle_ptt_release_task:
                     self.paddle_ptt_release_task.cancel()
