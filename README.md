@@ -42,7 +42,7 @@ Python application for controlling SunSDR radios via TCI (Transceiver Command In
 - D1 (PA04) → Dah paddle
 - GND → Common ground
 
-See [USB_HID_copy/HARDWARE.md](USB_HID_copy/HARDWARE.md) for detailed wiring.
+See [https://github.com/tompatulpan/duration-encoded-cw-protocol/blob/main/USB_HID/README.md](USB_HID) for detailed wiring.
 
 ## Software Requirements
 
@@ -75,7 +75,7 @@ If using USB paddle input:
    - Tools → Board Manager → Search "Seeed SAMD Boards"
    - Install "Seeed SAMD Boards"
 3. Select board: Tools → Board → Seeed SAMD → "Seeed XIAO M0"
-4. Open firmware: `USB_HID_copy/xiao_samd21_hid_key/xiao_samd21_hid_key.ino`
+4. Open firmware: `https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID/xiao_samd21_hid_key`
 5. Click Upload
 6. Verify: `lsusb -d 2886:802f` should show "Seeed XIAO SAMD21"
 
@@ -348,7 +348,7 @@ function_keys:
 - `keyboard_handler.py` - F-key macro handler
 - `usb_paddle_handler.py` - USB paddle input with timing
 - `sidetone_generator.py` - Local audio sidetone
-- `xiao_hid_reader.py` - USB HID device reader (from USB_HID_copy)
+- `xiao_hid_reader.py` - USB HID device reader
 - `install_udev.sh` - udev rules installer
 - `requirements.txt` - Python dependencies
 
