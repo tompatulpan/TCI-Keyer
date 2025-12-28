@@ -1,0 +1,16 @@
+# TCI CW Controller Dependencies
+
+# WebSocket client for TCI protocol
+websockets>=12.0
+
+# Keyboard input handling for F-key macros
+pynput>=1.7.6
+
+# Audio output for local sidetone (USB paddle keying)
+pyaudio>=0.2.13
+
+# Configuration file parsing
+PyYAML>=6.0
+
+# Note: xiao_hid_reader.py uses only stdlib (os, glob, struct, subprocess)
+# No additional dependencies needed for USB HID reading
