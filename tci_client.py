@@ -177,18 +177,28 @@ class TCIClient:
         """
         await self.send_command(f"CW_MACROS_SPEED:{wpm}")
     
-    async def send_cw_macros(self, text: str):
+    async def send_cw_macros(self, text: str, force_ptt: bool = False):
         """
         Send CW text macro (text-to-morse conversion)
         
         Args:
             text: Text to send as CW
                   Special: > = faster, < = slower, |SK| = prosign
+            force_ptt: If True, explicitly enable PTT before sending (workaround for focus issues)
         """
         # Escape reserved characters in TCI protocol
         text = text.replace(':', '^')  # : → ^
         text = text.replace(',', '~')  # , → ~
         text = text.replace(';', '*')  # ; → *
+        
+        # Workaround for ExpertSDR3 event loop bug:
+        # The VFO query doesn't help - ExpertSDR3 doesn't process ANY websocket 
+        # messages until a Windows UI event occurs. This is a bug in ExpertSDR3.
+        
+        # Workaround: Force PTT on if ExpertSDR3 requires focus
+        if force_ptt:
+            await self.send_command(f"TRX:{self.trx_number},true")
+            await asyncio.sleep(0.05)  # Small delay for PTT to engage
         
         await self.send_command(f"cw_macros:{self.trx_number},{text}")
     

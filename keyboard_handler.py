@@ -10,29 +10,41 @@ import logging
 from pynput import keyboard
 from typing import Dict, Optional, Callable
 
+# Log which backend pynput is using
+try:
+    import pynput.keyboard._xorg
+    PYNPUT_BACKEND = "X11/Xlib (XWayland)"
+except ImportError:
+    try:
+        import pynput.keyboard._uinput
+        PYNPUT_BACKEND = "evdev/uinput"
+    except ImportError:
+        PYNPUT_BACKEND = "unknown"
+
 
 class KeyboardHandler:
     """Handle F1-F12 keyboard input for CW macros"""
     
-    def __init__(self, function_keys: Dict[str, str], callsign: str, event_loop=None):
+    def __init__(self, function_keys: Dict[str, str], callsign: str, loop: asyncio.AbstractEventLoop = None):
         """
         Initialize keyboard handler
         
         Args:
             function_keys: Dict mapping F-key names to CW message templates
             callsign: Operator callsign for {callsign} substitution
-            event_loop: Main event loop for scheduling async callbacks
+            loop: Event loop for thread-safe coroutine scheduling
         """
         self.function_keys = function_keys
         self.callsign = callsign
         self.listener: Optional[keyboard.Listener] = None
         self.running = False
-        self.event_loop = event_loop
+        self.loop = loop
         
-        # Callback when F-key pressed
+        # Callback when F-key pressed (called from pynput thread)
         self.on_macro_send: Optional[Callable[[str, str], None]] = None
         
         self.logger = logging.getLogger("KeyboardHandler")
+        self.logger.info(f"pynput backend: {PYNPUT_BACKEND}")
     
     def _substitute_message(self, template: str) -> str:
         """
@@ -71,17 +83,18 @@ class KeyboardHandler:
                     message = self._substitute_message(message_template)
                     
                     self.logger.info(f"{key_name}: {message}")
+                    print(f"[{key_name}] Sending: {message}")
                     
-                    # Call callback (thread-safe async scheduling)
-                    if self.on_macro_send and self.event_loop:
-                        # Schedule callback in main event loop from this thread
+                    # Call callback via run_coroutine_threadsafe (from pynput thread)
+                    if self.on_macro_send and self.loop:
                         asyncio.run_coroutine_threadsafe(
                             self.on_macro_send(key_name, message),
-                            self.event_loop
+                            self.loop
                         )
                         
         except Exception as e:
             self.logger.error(f"Error handling key press: {e}")
+    
     
     def start(self):
         """Start keyboard listener"""

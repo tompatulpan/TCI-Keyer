@@ -102,13 +102,10 @@ class TCICWController:
         """Initialize F-key keyboard handler"""
         self.logger.info("Initializing F-key handler")
         
-        # Get the current event loop
-        event_loop = asyncio.get_event_loop()
-        
         self.keyboard_handler = KeyboardHandler(
             function_keys=self.config['function_keys'],
             callsign=self.config['operator']['callsign'],
-            event_loop=event_loop
+            loop=asyncio.get_event_loop()
         )
         
         # Setup callback
@@ -212,7 +209,7 @@ class TCICWController:
     
     async def _on_macro_send(self, key_name: str, message: str):
         """
-        Callback when F-key macro is pressed
+        Callback when F-key macro is pressed (called from pynput thread via run_coroutine_threadsafe)
         
         Args:
             key_name: Function key name (F1-F12)
@@ -222,8 +219,13 @@ class TCICWController:
             self.logger.warning(f"Cannot send {key_name}: TCI not ready")
             return
         
-        print(f"\n[{key_name}] Sending: {message}")
-        await self.tci_client.send_cw_macros(message)
+        self.logger.info(f"Sending CW macro: {message}")
+        
+        try:
+            force_ptt = self.config['tci'].get('force_ptt', False)
+            await self.tci_client.send_cw_macros(message, force_ptt=force_ptt)
+        except Exception as e:
+            self.logger.error(f"Error sending CW macro: {e}")
     
     async def _on_paddle_event(self, key_down: bool, previous_duration_ms: int):
         """
@@ -258,6 +260,40 @@ class TCICWController:
             else:
                 self.logger.error("Reconnection failed, retrying...")
     
+    async def _keepalive_ping_loop(self):
+        """
+        Send periodic VFO queries to keep ExpertSDR3 event loop active
+        Workaround for Windows message pump not processing WebSocket without UI events
+        """
+        self.logger.info("Keepalive ping enabled (workaround for ExpertSDR3)")
+        
+        while self.running:
+            try:
+                if self.tci_client and self.tci_client.ready:
+                    # Send harmless query that requires response
+                    await self.tci_client.send_command(f"VFO:{self.tci_client.trx_number},0")
+                
+                # Ping every 100ms
+                await asyncio.sleep(0.1)
+                
+            except Exception as e:
+                self.logger.debug(f"Keepalive ping error: {e}")
+                await asyncio.sleep(1.0)
+    
+    async def _event_loop_wakeup(self):
+        """
+        Periodically wake up the event loop to process callbacks from threads
+        Ensures keyboard callbacks scheduled via run_coroutine_threadsafe are processed
+        """
+        self.logger.info("Event loop wakeup task started (polls keyboard queue every 10ms)")
+        while self.running:
+            # Process keyboard queue
+            if self.keyboard_handler:
+                await self.keyboard_handler.process_queue()
+            
+            # Yield control - keeps event loop responsive
+            await asyncio.sleep(0.01)  # 10ms - fast enough for responsive UI
+    
     async def run(self):
         """Main application loop"""
         self.running = True
@@ -283,6 +319,13 @@ class TCICWController:
             
             # TCI receive loop
             tasks.append(asyncio.create_task(self.tci_client.receive_loop()))
+            
+            # Keepalive ping task (workaround for ExpertSDR3 event loop)
+            if self.config['tci'].get('keepalive_ping', False):
+                tasks.append(asyncio.create_task(self._keepalive_ping_loop()))
+            
+            # Event loop wakeup task disabled - was too aggressive
+            # tasks.append(asyncio.create_task(self._event_loop_wakeup()))
             
             # USB paddle poll loop
             if self.usb_paddle_handler:

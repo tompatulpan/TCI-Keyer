@@ -3,12 +3,12 @@
 # Radio connection settings
 tci:
   host: "localhost"        # TCI server IP address or hostname
-  port: 50001              # TCI server port (try 40001, 50001, or check ExpertSDR3 settings)
+  port: 40001              # TCI server port (try 40001, 50001, or check ExpertSDR3 settings)
   trx_number: 0            # Transceiver number (usually 0)
   auto_reconnect: true     # Reconnect automatically on disconnect
   reconnect_delay: 3.0     # Seconds to wait before reconnecting
   force_ptt: true          # Force PTT before CW macros (workaround for ExpertSDR3 focus issue)
-  keepalive_ping: true     # Send periodic pings to keep ExpertSDR3 event loop active (Wayland workaround)
+  keepalive_ping: false    # Send periodic pings to keep ExpertSDR3 event loop active (Wayland workaround - DOESN'T WORK)
 
 # Operator settings
 operator:
