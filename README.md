@@ -205,9 +205,17 @@ tci:
 ```yaml
 cw:
   default_mode: "CW"       # CW, CWL, or CWU
-  speed_wpm: 25            # Words per minute
+  speed_wpm: 25            # Words per minute (for USB paddle keying only)
   keyer_mode: "straight"   # straight, iambic-a, iambic-b
 ```
+
+**Important: CW Speed Configuration**
+- **F-key macros:** Speed controlled by **ExpertSDR3's internal CW speed setting**
+  - Change in: ExpertSDR3 → Settings → CW → Speed (WPM)
+  - The `speed_wpm` value in config.yaml does **not** affect F-key macro speed
+- **USB paddle keying:** Speed controlled by `speed_wpm` in config.yaml
+  - This sets the timing for iambic keyer element generation
+  - Match this to ExpertSDR3's speed for consistent timing between macros and paddle
 
 **Keyer Mode:**
 - `straight` - Send raw paddle states to TCI (recommended - test first)
@@ -242,10 +250,12 @@ function_keys:
 
 **Special Characters:**
 - `{callsign}` - Replaced with your callsign
-- `>` - Increase speed by 5 WPM
-- `<` - Decrease speed by 5 WPM
+- `>` - Increase speed by 5 WPM (within ExpertSDR3)
+- `<` - Decrease speed by 5 WPM (within ExpertSDR3)
 - `|SK|` - Send prosign (combine letters)
 - `|AR|`, `|BT|`, etc.
+
+**Note:** The `>` and `<` speed changes affect ExpertSDR3's internal CW speed setting, which controls F-key macro speed but not USB paddle speed.
 
 **Reserved Characters** (automatically escaped):
 - `:` becomes `^`
@@ -420,6 +430,7 @@ asyncio.run(test())
 - [ ] **Quick "Repeat last sent" button**: Instantly resend the last transmitted message.
 - [ ] **Graphical User Interface (GUI)**: User-friendly interface for configuration, macro editing, and live status.
 - [ ] **Windows support**: Port application for Windows, including USB HID and audio compatibility.
+- [ ] PTT hold timer.
 - [ ] Macro editor: Edit F-key macros from the GUI without editing YAML.
 - [ ] Contest mode: Add QSO numbering, serials, and contest logging features.
 - [ ] Network paddle: Support remote paddle input via UDP or TCP.

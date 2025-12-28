@@ -17,7 +17,10 @@ operator:
 # CW settings
 cw:
   default_mode: "CW"       # Default mode: CW, CWL, or CWU
-  speed_wpm: 25            # CW speed in words per minute
+  speed_wpm: 25            # CW speed for USB paddle keying (words per minute)
+                           # NOTE: F-key macros use ExpertSDR3's internal CW speed setting,
+                           # not this value. Set macro speed in ExpertSDR3 → Settings → CW.
+                           # This speed_wpm only affects manual paddle keying timing.
   # Keyer mode for USB paddle input (if TCI doesn't handle iambic)
   keyer_mode: "iambic-b"   # Options: straight, iambic-a, iambic-b
   paddle_auto_ptt: true    # Automatically trigger PTT for paddle keying (needed if Break-in disabled in ExpertSDR3)
@@ -40,6 +43,8 @@ usb_hid:
 # Function key CW macros (F1-F12)
 # Use {callsign} for substitution
 # Special characters: > = faster, < = slower, |SK| = prosign
+# NOTE: Macro speed is controlled by ExpertSDR3's CW speed setting, NOT config.yaml speed_wpm.
+# To change F-key macro speed: ExpertSDR3 → Settings → CW → Speed (WPM)
 function_keys:
   F1: "CQ CQ CQ DE {callsign} {callsign} K"
   F2: "DE {callsign} K"
