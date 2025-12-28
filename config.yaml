@@ -7,7 +7,7 @@ tci:
   trx_number: 0            # Transceiver number (usually 0)
   auto_reconnect: true     # Reconnect automatically on disconnect
   reconnect_delay: 3.0     # Seconds to wait before reconnecting
-  force_ptt: true          # Force PTT before CW macros (workaround for ExpertSDR3 focus issue)
+  force_ptt: false          # Force PTT before CW macros (workaround for ExpertSDR3 focus issue)
   keepalive_ping: false    # Send periodic pings to keep ExpertSDR3 event loop active (Wayland workaround - DOESN'T WORK)
 
 # Operator settings
@@ -17,17 +17,20 @@ operator:
 # CW settings
 cw:
   default_mode: "CW"       # Default mode: CW, CWL, or CWU
-  speed_wpm: 25            # CW speed for USB paddle keying (words per minute)
+  speed_wpm: 15            # CW speed for USB paddle keying (words per minute)
                            # NOTE: F-key macros use ExpertSDR3's internal CW speed setting,
                            # not this value. Set macro speed in ExpertSDR3 → Settings → CW.
                            # This speed_wpm only affects manual paddle keying timing.
-  # Keyer mode for USB paddle input (if TCI doesn't handle iambic)
-  keyer_mode: "iambic-b"   # Options: straight, iambic-a, iambic-b
-  paddle_auto_ptt: true    # Automatically trigger PTT for paddle keying (needed if Break-in disabled in ExpertSDR3)
+  keyer_mode: "iambic-b"   # Keyer mode: straight, iambic-a, iambic-b
+  tx_settle_time: 0.050    # Seconds to wait after TRX enable before first KEYER command
+                           # This allows ExpertSDR3 to fully switch to TX mode.
+                           # Too low = first dit/dah gets clipped or lost
+                           # Too high = noticeable delay when starting to key
+                           # Typical values: 0.050-0.150 (50-150ms)
 
 # Sidetone settings (for USB paddle manual keying)
 sidetone:
-  enabled: false           # Enable/disable local Python sidetone (set to false to use only ExpertSDR3 sidetone)
+  enabled: true           # Enable/disable local Python sidetone (set to false to use only ExpertSDR3 sidetone)
   frequency: 600           # Sidetone frequency in Hz (typical: 400-800)
   volume: 0.5              # Volume level (0.0-1.0)
   # Note: F-key macros always use radio's sidetone (from ExpertSDR3)

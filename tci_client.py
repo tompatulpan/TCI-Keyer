@@ -35,6 +35,7 @@ class TCIClient:
         
         # State tracking (read from TCI server on connect)
         self.drive_level = 0  # Drive level (%), set from server on connect
+        self.current_mode = None  # Current modulation mode (CW, USB, LSB, etc.)
         
         # Callbacks for events
         self.on_ready: Optional[Callable] = None
@@ -170,6 +171,27 @@ class TCIClient:
             mode: CW mode (CW, CWL, or CWU)
         """
         await self.send_command(f"MODULATION:{self.trx_number},{mode}")
+        self.current_mode = mode.upper()
+    
+    def parse_modulation_from_message(self, message: str):
+        """
+        Parse MODULATION message and update current mode
+        
+        Args:
+            message: TCI message like 'MODULATION:0,CW;'
+        """
+        try:
+            # Format: MODULATION:trx,mode;
+            parts = message.rstrip(';').split(':')
+            if len(parts) >= 2:
+                args = parts[1].split(',')
+                if len(args) >= 2:
+                    trx = int(args[0])
+                    if trx == self.trx_number:
+                        self.current_mode = args[1].upper()
+                        self.logger.debug(f"Mode updated: {self.current_mode}")
+        except Exception as e:
+            self.logger.debug(f"Error parsing MODULATION: {e}")
     
     async def set_cw_speed(self, wpm: int):
         """

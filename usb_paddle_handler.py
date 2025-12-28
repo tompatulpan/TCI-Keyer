@@ -55,6 +55,7 @@ class USBPaddleHandler:
         
         # Callbacks
         self.on_key_event: Optional[Callable[[bool, int], None]] = None  # (key_down, prev_duration_ms)
+        self.on_tx_start: Optional[Callable[[], None]] = None  # Called when keying starts (for TX pre-arm)
         
         self.logger = logging.getLogger("USBPaddleHandler")
     
@@ -196,11 +197,17 @@ class USBPaddleHandler:
                 f"element={int(duration_ms)}ms, prev={previous_duration_ms}ms"
             )
         
+        # Pre-arm TX callback - called once before first element to enable TX
+        async def pre_arm_tx():
+            """Setup TX before first keying element (allows TX settling time)"""
+            if self.on_tx_start:
+                await self.on_tx_start()
+        
         # Main iambic loop - uses blocking sleep for precise timing
         while self.running:
             try:
                 # Let iambic keyer generate elements (blocking)
-                is_active = await self.iambic_keyer.update(paddle_reader, send_element)
+                is_active = await self.iambic_keyer.update(paddle_reader, send_element, pre_arm_tx)
                 
                 if not is_active:
                     # Keyer went idle, reset timing for next transmission
@@ -267,13 +274,14 @@ class IambicKeyer:
         self.dah_duration = self.dit_duration * 3
         self.element_space = self.dit_duration
     
-    async def update(self, paddle_reader, send_element_callback):
+    async def update(self, paddle_reader, send_element_callback, pre_arm_callback=None):
         """
         Main keyer update - generates iambic elements
         
         Args:
             paddle_reader: function() -> (dit: bool, dah: bool) - SYNC function
             send_element_callback: async function(key_down: bool, duration_ms: float)
+            pre_arm_callback: async function() - called ONCE before first element (for TX pre-arm)
         
         Returns:
             bool - True if keyer active, False if idle
@@ -287,6 +295,10 @@ class IambicKeyer:
                 self.dit_memory = False
                 self.dah_memory = False
                 self.state = self.DIT
+                
+                # Pre-arm TX before first element (allows settling time)
+                if pre_arm_callback:
+                    await pre_arm_callback()
                 
                 # Send dit
                 await send_element_callback(True, self.dit_duration)
@@ -303,6 +315,10 @@ class IambicKeyer:
                 self.dit_memory = False
                 self.dah_memory = False
                 self.state = self.DAH
+                
+                # Pre-arm TX before first element (allows settling time)
+                if pre_arm_callback:
+                    await pre_arm_callback()
                 
                 # Send dah
                 await send_element_callback(True, self.dah_duration)

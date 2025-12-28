@@ -50,7 +50,6 @@ class TCICWController:
         
         # PTT state tracking for paddle keying
         self.paddle_ptt_active = False
-        self.paddle_auto_ptt = self.config['cw'].get('paddle_auto_ptt', True)
         self.paddle_ptt_hangtime = 1.0  # Seconds to keep PTT active after last key-up
         self.paddle_ptt_release_task = None
     
@@ -97,7 +96,14 @@ class TCICWController:
         success = await self.tci_client.connect()
         
         if success:
-            # Set initial radio state
+            # Query current state (mode, drive) - responses will be parsed by _on_tci_message
+            await self.tci_client.send_command(f"MODULATION:{self.tci_client.trx_number}")
+            await self.tci_client.send_command(f"DRIVE:{self.tci_client.trx_number}")
+            await asyncio.sleep(0.1)  # Allow responses to arrive
+            
+            self.logger.info(f"Initial state: mode={self.tci_client.current_mode}, drive={self.tci_client.drive_level}%")
+            
+            # Set CW mode and speed
             cw_config = self.config['cw']
             await self.tci_client.set_mode_cw(cw_config.get('default_mode', 'CW'))
             await self.tci_client.set_cw_speed(cw_config.get('speed_wpm', 25))
@@ -152,8 +158,9 @@ class TCICWController:
             self.usb_paddle_handler = None
             return False
         
-        # Setup callback
+        # Setup callbacks
         self.usb_paddle_handler.on_key_event = self._on_paddle_event
+        self.usb_paddle_handler.on_tx_start = self._on_paddle_tx_start
         
         # Pass sidetone to paddle handler for immediate audio feedback (if enabled)
         if self.sidetone:
@@ -225,6 +232,10 @@ class TCICWController:
         if message.lower().startswith('drive:'):
             self.tci_client.parse_drive_from_message(message)
         
+        # Track mode changes (for band change detection)
+        if message.upper().startswith('MODULATION:'):
+            self.tci_client.parse_modulation_from_message(message)
+        
         # Log interesting messages
         if message.startswith(('VFO:', 'MODULATION:', 'TRX:', 'drive:')):
             self.logger.debug(f"TCI: {message}")
@@ -251,32 +262,25 @@ class TCICWController:
     
     async def _on_paddle_event(self, key_down: bool, previous_duration_ms: int):
         """
-        Callback when USB paddle state changes
+        Callback for each paddle key state change.
         
         Args:
-            key_down: Current key state (True=down, False=up)
-            previous_duration_ms: Duration of previous state in milliseconds
+            key_down: Current key state (True=pressed, False=released)
+            previous_duration_ms: Duration of the previous state in milliseconds
+                                  (used by TCI protocol for timing reconstruction)
         
-        Note: Sidetone is now handled directly in usb_paddle_handler for precise timing
-        Note: KEYER generates CW carrier but requires DRIVE + TRX to be set first
+        Note: TX is pre-armed in _on_paddle_tx_start before the first element,
+              so KEYER commands here are sent with TX already active.
+        Note: Sidetone is handled in usb_paddle_handler for minimal latency.
         """
         # Send to TCI
         if self.tci_client and self.tci_client.ready:
-            # Cancel any pending PTT release on new key activity
+            # Cancel any pending PTT release when new keying starts
             if self.paddle_ptt_release_task and key_down:
                 self.paddle_ptt_release_task.cancel()
                 self.paddle_ptt_release_task = None
             
-            # On first key-down, setup DRIVE and TRX
-            if key_down and not self.paddle_ptt_active:
-                # Set drive level (use the level read from ExpertSDR3 at startup)
-                await self.tci_client.set_drive(self.tci_client.drive_level)
-                # Enable TX mode
-                await self.tci_client.set_ptt(True)
-                self.paddle_ptt_active = True
-                self.logger.debug(f"Paddle TX enabled (drive={self.tci_client.drive_level}%)")
-            
-            # Send KEYER command (generates CW carrier when TRX is active)
+            # Send KEYER command (TX already armed by on_tx_start callback)
             await self.tci_client.send_keyer(key_down, previous_duration_ms)
             
             # Schedule PTT release after key-up with hangtime
@@ -289,6 +293,40 @@ class TCICWController:
                 self.paddle_ptt_release_task = asyncio.create_task(
                     self._release_paddle_ptt_after_hangtime()
                 )
+    
+    async def _on_paddle_tx_start(self):
+        """
+        Called BEFORE first iambic element to pre-arm TX.
+        
+        The TCI KEYER command requires TX to be active before it will generate
+        a CW carrier. This callback is called when the paddle is first touched,
+        BEFORE the iambic keyer generates any elements. This ensures TX is ready
+        when the first dit/dah is sent.
+        
+        Sequence:
+        1. Paddle touched → this callback fires
+        2. MODULATION (if not CW) → TRX:true → wait tx_settle_time
+        3. First KEYER command sent (TX already active)
+        """
+        if not self.tci_client or not self.tci_client.ready:
+            return
+        
+        if not self.paddle_ptt_active:
+            # Switch to CW mode if currently in a different mode (e.g., after band change)
+            if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
+                self.logger.debug(f"Mode is {self.tci_client.current_mode}, switching to CW")
+                await self.tci_client.set_mode_cw()
+            
+            # Enable TX
+            await self.tci_client.set_ptt(True)
+            self.paddle_ptt_active = True
+            
+            # Wait for ExpertSDR3 to complete TX switch before first KEYER
+            # Without this delay, the first dit/dah may be clipped or lost
+            tx_settle_time = self.config['cw'].get('tx_settle_time', 0.050)
+            await asyncio.sleep(tx_settle_time)
+            
+            self.logger.debug(f"TX pre-armed (mode={self.tci_client.current_mode}, settle={tx_settle_time*1000:.0f}ms)")
     
     async def _release_paddle_ptt_after_hangtime(self):
         """Release paddle PTT after hangtime delay"""

@@ -175,8 +175,9 @@ The configured message will be sent to TCI with `{callsign}` substituted.
 
 If USB paddle is connected:
 - Press dit/dah paddles
-- Local sidetone provides instant feedback
+- Local sidetone provides instant feedback (if enabled)
 - Key state sent to radio via TCI KEYER command
+- Break-In handles PTT and CW carrier generation
 
 ### Stop the Controller
 
@@ -423,6 +424,23 @@ async def test():
 asyncio.run(test())
 "
 ```
+
+## Known Limitations
+
+### TX Spectrum Display (KEYER command)
+
+When using manual paddle keying via the TCI `KEYER` command, the **TX spectrum in ExpertSDR3 may not show the CW carrier**, even though the CW signal is actually being transmitted.
+
+**Observed behavior:**
+- Radio goes to TX mode (TX indicator lit)
+- CW carrier is transmitted (verified on separate receiver)
+- TX spectrum display shows no carrier/signal
+
+**Why this happens:**
+- `cw_macros`: Uses ExpertSDR3's internal CW generator → carrier appears in TX spectrum
+- `KEYER`: External key state notification → carrier may be injected at a later stage in the TX chain, bypassing the spectrum visualization point
+
+**Status:** This is a display issue in ExpertSDR3, not a functional problem. The CW is transmitted correctly. May be raised with Expert Electronics support.
 
 ## ToDo / Feature Wishlist
 
