@@ -155,9 +155,12 @@ class TCICWController:
         # Setup callback
         self.usb_paddle_handler.on_key_event = self._on_paddle_event
         
-        # Pass sidetone to paddle handler for immediate audio feedback
+        # Pass sidetone to paddle handler for immediate audio feedback (if enabled)
         if self.sidetone:
             self.usb_paddle_handler.set_sidetone(self.sidetone)
+            self.logger.info("Local sidetone enabled for paddle")
+        else:
+            self.logger.info("Using ExpertSDR3 sidetone only")
         
         return True
     

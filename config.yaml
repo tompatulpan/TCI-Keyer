@@ -24,10 +24,10 @@ cw:
 
 # Sidetone settings (for USB paddle manual keying)
 sidetone:
-  enabled: true            # Enable/disable local sidetone
+  enabled: false           # Enable/disable local Python sidetone (set to false to use only ExpertSDR3 sidetone)
   frequency: 600           # Sidetone frequency in Hz (typical: 400-800)
   volume: 0.5              # Volume level (0.0-1.0)
-  # Note: F-key macros use radio's sidetone (from ExpertSDR3)
+  # Note: F-key macros always use radio's sidetone (from ExpertSDR3)
 
 # USB HID settings (for physical morse key via XIAO SAMD21)
 usb_hid:

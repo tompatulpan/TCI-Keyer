@@ -185,6 +185,7 @@ web_platform/
 old/
 testing/
 USB_HID_copy/
+protocol_copy/
 
 # Web platform - Node.js and development files
 node_modules/
