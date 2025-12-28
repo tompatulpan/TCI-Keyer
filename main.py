@@ -47,6 +47,12 @@ class TCICWController:
         # State
         self.running = False
         self.reconnect_task = None
+        
+        # PTT state tracking for paddle keying
+        self.paddle_ptt_active = False
+        self.paddle_auto_ptt = self.config['cw'].get('paddle_auto_ptt', True)
+        self.paddle_ptt_hangtime = 1.0  # Seconds to keep PTT active after last key-up
+        self.paddle_ptt_release_task = None
     
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file"""
@@ -241,7 +247,43 @@ class TCICWController:
         
         # Send to TCI
         if self.tci_client and self.tci_client.ready:
+            # Auto-PTT: Activate PTT on first key-down if enabled
+            if self.paddle_auto_ptt and key_down and not self.paddle_ptt_active:
+                # Cancel any pending PTT release
+                if self.paddle_ptt_release_task:
+                    self.paddle_ptt_release_task.cancel()
+                    self.paddle_ptt_release_task = None
+                
+                await self.tci_client.set_ptt(True)
+                self.paddle_ptt_active = True
+                self.logger.debug("Paddle PTT activated")
+            
+            # Send keyer command
             await self.tci_client.send_keyer(key_down, previous_duration_ms)
+            
+            # Auto-PTT: Schedule PTT release after key-up with hangtime
+            if self.paddle_auto_ptt and not key_down and self.paddle_ptt_active:
+                # Cancel any previous release task
+                if self.paddle_ptt_release_task:
+                    self.paddle_ptt_release_task.cancel()
+                
+                # Schedule new release after hangtime
+                self.paddle_ptt_release_task = asyncio.create_task(
+                    self._release_paddle_ptt_after_hangtime()
+                )
+    
+    async def _release_paddle_ptt_after_hangtime(self):
+        """Release paddle PTT after hangtime delay"""
+        try:
+            await asyncio.sleep(self.paddle_ptt_hangtime)
+            
+            if self.tci_client and self.tci_client.ready and self.paddle_ptt_active:
+                await self.tci_client.set_ptt(False)
+                self.paddle_ptt_active = False
+                self.logger.debug("Paddle PTT released (hangtime)")
+        except asyncio.CancelledError:
+            # Task was cancelled (new keying started)
+            pass
     
     async def _reconnect_loop(self):
         """Reconnection loop with delay"""

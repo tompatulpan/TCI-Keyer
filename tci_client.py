@@ -226,3 +226,12 @@ class TCIClient:
         """
         state = "true" if transmit else "false"
         await self.send_command(f"TRX:{self.trx_number},{state}")
+    
+    async def set_ptt(self, transmit: bool):
+        """
+        Set PTT (Push-To-Talk) state - alias for set_trx()
+        
+        Args:
+            transmit: True for TX, False for RX
+        """
+        await self.set_trx(transmit)

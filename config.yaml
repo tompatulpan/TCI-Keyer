@@ -19,7 +19,8 @@ cw:
   default_mode: "CW"       # Default mode: CW, CWL, or CWU
   speed_wpm: 25            # CW speed in words per minute
   # Keyer mode for USB paddle input (if TCI doesn't handle iambic)
-  keyer_mode: "straight"   # Options: straight, iambic-a, iambic-b
+  keyer_mode: "iambic-b"   # Options: straight, iambic-a, iambic-b
+  paddle_auto_ptt: true    # Automatically trigger PTT for paddle keying (needed if Break-in disabled in ExpertSDR3)
 
 # Sidetone settings (for USB paddle manual keying)
 sidetone:
