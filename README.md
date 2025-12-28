@@ -7,6 +7,8 @@ Python application for controlling SunSDR radios via TCI (Transceiver Command In
 - **Local sidetone** - Instant audio feedback for paddle operation (<20ms latency)
 - **Configurable** - YAML-based configuration for callsign, messages, and settings
 
+**Status:** 🚧 In development - Features and structure subject to change
+
 ## Features
 
 ### F-Key CW Macros
@@ -45,8 +47,9 @@ See [USB_HID_copy/HARDWARE.md](USB_HID_copy/HARDWARE.md) for detailed wiring.
 ## Software Requirements
 
 - Python 3.8 or higher
-- Linux (Fedora, Ubuntu, or similar) - for USB HID support
+- Linux (Ubuntu, or similar) - for USB HID support
 - ExpertSDR3 with TCI protocol enabled
+- Windows should work, NOT tested yet.
 
 ## Installation
 
@@ -341,13 +344,12 @@ function_keys:
 
 ## License
 
-Based on existing USB HID implementation which references Vail-CW adapter (MIT License).
+MIT License
 
 ## Credits
 
-- USB HID implementation based on Vail-CW adapter project
-- TCI protocol specification from ExpertSDR3
-- XIAO SAMD21 hardware by Seeed Studio
+- USB HID implementation inspired by the Vail-CW adapter project
+- TCI protocol specification from ExpertSDR3 - https://github.com/ExpertSDR3/TCI
 
 ## Support
 
@@ -411,3 +413,16 @@ async def test():
 asyncio.run(test())
 "
 ```
+
+## ToDo / Feature Wishlist
+
+- [ ] **Send as you write**: Option to transmit CW in real-time as you type, not just via macros or paddle.
+- [ ] **Quick "Repeat last sent" button**: Instantly resend the last transmitted message.
+- [ ] **Graphical User Interface (GUI)**: User-friendly interface for configuration, macro editing, and live status.
+- [ ] **Windows support**: Port application for Windows, including USB HID and audio compatibility.
+- [ ] Macro editor: Edit F-key macros from the GUI without editing YAML.
+- [ ] Contest mode: Add QSO numbering, serials, and contest logging features.
+- [ ] Network paddle: Support remote paddle input via UDP or TCP.
+- [ ] Hamlib/CAT fallback: Alternative to TCI for radios without TCI support.
+- [ ] Advanced error handling: More robust reconnect and diagnostics.
+- [ ] Customizable sidetone: Per-operator sidetone profiles and advanced audio settings.
