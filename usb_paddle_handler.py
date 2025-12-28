@@ -18,6 +18,7 @@ class USBPaddleHandler:
     
     def __init__(self, device_path: Optional[str] = None, 
                  vendor_id: str = "2886", product_id: str = "802f",
+                 keyer_mode: str = "straight", wpm: int = 20,
                  debug: bool = False):
         """
         Initialize USB paddle handler
@@ -26,6 +27,8 @@ class USBPaddleHandler:
             device_path: Explicit device path or None for auto-detect
             vendor_id: USB Vendor ID
             product_id: USB Product ID
+            keyer_mode: 'straight', 'iambic-a', or 'iambic-b'
+            wpm: Words per minute for iambic keyer
             debug: Enable debug output
         """
         self.hid_reader = XiaoHIDReader(
@@ -37,8 +40,15 @@ class USBPaddleHandler:
         
         self.running = False
         self.poll_interval = 0.001  # 1ms polling
+        self.keyer_mode = keyer_mode.lower()
         
-        # Timing state
+        # Initialize iambic keyer if needed
+        self.iambic_keyer = None
+        if self.keyer_mode in ['iambic-a', 'iambic-b']:
+            mode_letter = 'B' if self.keyer_mode == 'iambic-b' else 'A'
+            self.iambic_keyer = IambicKeyer(wpm=wpm, mode=mode_letter)
+        
+        # Timing state (for straight key mode)
         self.key_down = False
         self.last_event_time: Optional[float] = None
         self.transmission_start: Optional[float] = None
@@ -67,15 +77,26 @@ class USBPaddleHandler:
     
     async def poll_loop(self):
         """
-        Main polling loop - reads paddle state and measures timing
+        Main polling loop - reads paddle state and generates keying events
         
-        This implements the TCI KEYER timing semantics:
-        - Previous duration is sent with each state change
-        - First event always has 0ms previous duration
+        Supports:
+        - straight: Either paddle = key down (no timing logic)
+        - iambic-a/b: Full iambic keyer with squeeze and memory
         """
         self.running = True
-        self.logger.info("USB paddle polling started")
+        mode_display = self.keyer_mode.upper().replace('-', ' ')
+        self.logger.info(f"USB paddle polling started ({mode_display} mode)")
         
+        # Choose appropriate loop based on mode
+        if self.iambic_keyer:
+            await self._iambic_poll_loop()
+        else:
+            await self._straight_poll_loop()
+        
+        self.logger.info("USB paddle polling stopped")
+    
+    async def _straight_poll_loop(self):
+        """Straight key mode: either paddle = key down"""
         while self.running:
             try:
                 # Read paddle states (dit, dah)
@@ -115,21 +136,85 @@ class USBPaddleHandler:
                         f"Key {'DOWN' if new_key_down else 'UP'}, "
                         f"prev_duration={previous_duration_ms}ms"
                     )
-                    
-                    # Reset transmission tracking when returning to idle
-                    if not new_key_down:
-                        # Check if we've been idle for a while (end of transmission)
-                        # This helps reset timing for next transmission
-                        pass  # Keep transmission_start for now
                 
                 # Sleep to achieve polling rate
                 await asyncio.sleep(self.poll_interval)
                 
             except Exception as e:
-                self.logger.error(f"Error in USB paddle poll loop: {e}")
+                self.logger.error(f"Error in straight key poll loop: {e}")
                 await asyncio.sleep(0.1)
+    
+    async def _iambic_poll_loop(self):
+        """Iambic keyer mode: generates dit/dah elements with proper timing"""
         
-        self.logger.info("USB paddle polling stopped")
+        # Timing state for TCI protocol
+        last_event_time = time.time()
+        transmission_start = None
+        
+        # Get sidetone reference from callback context (set by main.py)
+        sidetone = getattr(self, '_sidetone', None)
+        
+        def paddle_reader():
+            """Read current paddle states - SYNCHRONOUS for precise timing"""
+            return self.hid_reader.read_paddles()
+        
+        async def send_element(key_down: bool, duration_ms: float):
+            """Send a single keying element
+            
+            Args:
+                key_down: True for DOWN, False for UP
+                duration_ms: Element duration (dit/dah/space) - used for logging only
+            """
+            nonlocal last_event_time, transmission_start
+            
+            now = time.time()
+            
+            # Update sidetone IMMEDIATELY (synchronous, no delay)
+            if sidetone:
+                sidetone.set_key(key_down)
+            
+            # Calculate duration of PREVIOUS state (TCI protocol semantics)
+            if transmission_start is None:
+                transmission_start = now
+                previous_duration_ms = 0
+            else:
+                previous_duration_ms = int((now - last_event_time) * 1000)
+            
+            # Cap duration to prevent overflow
+            previous_duration_ms = min(previous_duration_ms, 65535)
+            
+            # Update state
+            last_event_time = now
+            self.key_down = key_down
+            
+            # Send keying event with PREVIOUS state's duration
+            if self.on_key_event:
+                await self.on_key_event(key_down, previous_duration_ms)
+            
+            self.logger.debug(
+                f"Iambic: {'DN' if key_down else 'UP'}, "
+                f"element={int(duration_ms)}ms, prev={previous_duration_ms}ms"
+            )
+        
+        # Main iambic loop - uses blocking sleep for precise timing
+        while self.running:
+            try:
+                # Let iambic keyer generate elements (blocking)
+                is_active = await self.iambic_keyer.update(paddle_reader, send_element)
+                
+                if not is_active:
+                    # Keyer went idle, reset timing for next transmission
+                    transmission_start = None
+                    # Small sleep when idle to avoid spinning
+                    await asyncio.sleep(0.001)
+                    
+            except Exception as e:
+                self.logger.error(f"Error in iambic keyer loop: {e}")
+                await asyncio.sleep(0.1)
+    
+    def set_sidetone(self, sidetone):
+        """Set sidetone generator for immediate audio feedback during iambic keying"""
+        self._sidetone = sidetone
     
     def stop(self):
         """Stop polling loop"""
@@ -187,14 +272,14 @@ class IambicKeyer:
         Main keyer update - generates iambic elements
         
         Args:
-            paddle_reader: async function() -> (dit: bool, dah: bool)
+            paddle_reader: function() -> (dit: bool, dah: bool) - SYNC function
             send_element_callback: async function(key_down: bool, duration_ms: float)
         
         Returns:
             bool - True if keyer active, False if idle
         """
         # Read current paddle states
-        dit_paddle, dah_paddle = await paddle_reader()
+        dit_paddle, dah_paddle = paddle_reader()
         
         # State: IDLE
         if self.state == self.IDLE:
@@ -205,12 +290,12 @@ class IambicKeyer:
                 
                 # Send dit
                 await send_element_callback(True, self.dit_duration)
-                await asyncio.sleep(self.dit_duration / 1000.0)
+                time.sleep(self.dit_duration / 1000.0)
                 await send_element_callback(False, self.element_space)
-                await asyncio.sleep(self.element_space / 1000.0)
+                time.sleep(self.element_space / 1000.0)
                 
                 # Check for opposite paddle (Mode B memory)
-                dit_paddle, dah_paddle = await paddle_reader()
+                dit_paddle, dah_paddle = paddle_reader()
                 if self.mode == 'B' and dah_paddle:
                     self.dah_memory = True
                     
@@ -221,12 +306,12 @@ class IambicKeyer:
                 
                 # Send dah
                 await send_element_callback(True, self.dah_duration)
-                await asyncio.sleep(self.dah_duration / 1000.0)
+                time.sleep(self.dah_duration / 1000.0)
                 await send_element_callback(False, self.element_space)
-                await asyncio.sleep(self.element_space / 1000.0)
+                time.sleep(self.element_space / 1000.0)
                 
                 # Check for opposite paddle (Mode B memory)
-                dit_paddle, dah_paddle = await paddle_reader()
+                dit_paddle, dah_paddle = paddle_reader()
                 if self.mode == 'B' and dit_paddle:
                     self.dit_memory = True
             else:
@@ -234,24 +319,25 @@ class IambicKeyer:
         
         # State: DIT - just sent a dit
         elif self.state == self.DIT:
-            # Sample paddles
-            dit_paddle, dah_paddle = await paddle_reader()
+            # Sample paddles during element space
+            dit_paddle, dah_paddle = paddle_reader()
             if dit_paddle:
                 self.dit_memory = True
             if dah_paddle:
                 self.dah_memory = True
             
-            # Decide next element
+            # Decide next element - DAH has priority (opposite paddle)
             if self.dah_memory:
                 self.dah_memory = False
                 self.state = self.DAH
                 
                 await send_element_callback(True, self.dah_duration)
-                await asyncio.sleep(self.dah_duration / 1000.0)
+                time.sleep(self.dah_duration / 1000.0)
                 await send_element_callback(False, self.element_space)
-                await asyncio.sleep(self.element_space / 1000.0)
+                time.sleep(self.element_space / 1000.0)
                 
-                dit_paddle, dah_paddle = await paddle_reader()
+                # Mode B: Check for opposite paddle during element
+                dit_paddle, dah_paddle = paddle_reader()
                 if self.mode == 'B' and dit_paddle:
                     self.dit_memory = True
                     
@@ -260,37 +346,40 @@ class IambicKeyer:
                 self.state = self.DIT
                 
                 await send_element_callback(True, self.dit_duration)
-                await asyncio.sleep(self.dit_duration / 1000.0)
+                time.sleep(self.dit_duration / 1000.0)
                 await send_element_callback(False, self.element_space)
-                await asyncio.sleep(self.element_space / 1000.0)
+                time.sleep(self.element_space / 1000.0)
                 
-                dit_paddle, dah_paddle = await paddle_reader()
+                # Mode B: Check for opposite paddle during element
+                dit_paddle, dah_paddle = paddle_reader()
                 if self.mode == 'B' and dah_paddle:
                     self.dah_memory = True
             else:
+                # No memory, return to idle
                 self.state = self.IDLE
                 return False
         
         # State: DAH - just sent a dah
         elif self.state == self.DAH:
-            # Sample paddles
-            dit_paddle, dah_paddle = await paddle_reader()
+            # Sample paddles during element space
+            dit_paddle, dah_paddle = paddle_reader()
             if dit_paddle:
                 self.dit_memory = True
             if dah_paddle:
                 self.dah_memory = True
             
-            # Decide next element
+            # Decide next element - DIT has priority (opposite paddle)
             if self.dit_memory:
                 self.dit_memory = False
                 self.state = self.DIT
                 
                 await send_element_callback(True, self.dit_duration)
-                await asyncio.sleep(self.dit_duration / 1000.0)
+                time.sleep(self.dit_duration / 1000.0)
                 await send_element_callback(False, self.element_space)
-                await asyncio.sleep(self.element_space / 1000.0)
+                time.sleep(self.element_space / 1000.0)
                 
-                dit_paddle, dah_paddle = await paddle_reader()
+                # Mode B: Check for opposite paddle during element
+                dit_paddle, dah_paddle = paddle_reader()
                 if self.mode == 'B' and dah_paddle:
                     self.dah_memory = True
                     
@@ -299,14 +388,16 @@ class IambicKeyer:
                 self.state = self.DAH
                 
                 await send_element_callback(True, self.dah_duration)
-                await asyncio.sleep(self.dah_duration / 1000.0)
+                time.sleep(self.dah_duration / 1000.0)
                 await send_element_callback(False, self.element_space)
-                await asyncio.sleep(self.element_space / 1000.0)
+                time.sleep(self.element_space / 1000.0)
                 
-                dit_paddle, dah_paddle = await paddle_reader()
+                # Mode B: Check for opposite paddle during element
+                dit_paddle, dah_paddle = paddle_reader()
                 if self.mode == 'B' and dit_paddle:
                     self.dit_memory = True
             else:
+                # No memory, return to idle
                 self.state = self.IDLE
                 return False
         

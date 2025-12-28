@@ -134,10 +134,15 @@ class TCICWController:
         
         self.logger.info("Initializing USB paddle handler")
         
+        usb_config = self.config['usb_hid']
+        cw_config = self.config['cw']
+        
         self.usb_paddle_handler = USBPaddleHandler(
             device_path=usb_config.get('device_path'),
             vendor_id=usb_config.get('vendor_id', '2886'),
             product_id=usb_config.get('product_id', '802f'),
+            keyer_mode=cw_config.get('keyer_mode', 'straight'),
+            wpm=cw_config.get('speed_wpm', 25),
             debug=usb_config.get('debug', False)
         )
         
@@ -149,6 +154,10 @@ class TCICWController:
         
         # Setup callback
         self.usb_paddle_handler.on_key_event = self._on_paddle_event
+        
+        # Pass sidetone to paddle handler for immediate audio feedback
+        if self.sidetone:
+            self.usb_paddle_handler.set_sidetone(self.sidetone)
         
         return True
     
@@ -240,11 +249,9 @@ class TCICWController:
         Args:
             key_down: Current key state (True=down, False=up)
             previous_duration_ms: Duration of previous state in milliseconds
-        """
-        # Update local sidetone (instant feedback)
-        if self.sidetone:
-            self.sidetone.set_key(key_down)
         
+        Note: Sidetone is now handled directly in usb_paddle_handler for precise timing
+        """
         # Send to TCI
         if self.tci_client and self.tci_client.ready:
             # Auto-PTT: Activate PTT on first key-down if enabled
