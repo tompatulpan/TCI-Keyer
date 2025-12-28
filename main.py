@@ -356,12 +356,11 @@ class TCICWController:
             # Initialize keyboard handler
             self._initialize_keyboard()
             
-            # Initialize USB paddle (optional)
-            self._initialize_usb_paddle()
+            # Initialize sidetone first (before USB paddle)
+            self._initialize_sidetone()
             
-            # Initialize sidetone (optional)
-            if self.usb_paddle_handler:
-                self._initialize_sidetone()
+            # Initialize USB paddle (optional) - needs sidetone to be ready
+            self._initialize_usb_paddle()
             
             # Start async tasks
             tasks = []
