@@ -30,6 +30,39 @@ Python application for controlling SunSDR radios via TCI (Transceiver Command In
 - Auto-reconnection on disconnect
 - Supports multiple transceivers
 
+## Known Limitations
+
+**Wayland display server** might have limitations of triggering the keying events.
+
+### TX Spectrum Display (KEYER command)
+
+When using manual paddle keying via the TCI `KEYER` command, the **TX spectrum in ExpertSDR3 may not show the CW carrier**, even though the CW signal is actually being transmitted.
+
+**Observed behavior:**
+- Radio goes to TX mode (TX indicator lit)
+- TX spectrum display shows no carrier/signal
+
+**Why this happens:**
+- `cw_macros`: Uses ExpertSDR3's internal CW generator → carrier appears in TX spectrum
+- `KEYER`: External key state notification → carrier may be injected at a later stage in the TX chain, bypassing the spectrum visualization point
+
+**Status:** This is a display issue in ExpertSDR3, not a functional problem. The CW is transmitted correctly. May be raised with Expert Electronics support.
+
+## ToDo / Feature Wishlist
+
+- [ ] **Send as you write**: Option to transmit CW in real-time as you type, not just via macros or paddle.
+- [ ] **Quick "Repeat last sent" button**: Instantly resend the last transmitted message.
+- [ ] **Graphical User Interface (GUI)**: User-friendly interface for configuration, macro editing, and live status.
+- [ ] **Windows support**: Port application for Windows, including USB HID and audio compatibility.
+- [ ] PTT hold timer.
+- [ ] Macro editor: Edit F-key macros from the GUI without editing YAML.
+- [ ] Contest mode: Add QSO numbering, serials, and contest logging features.
+- [ ] Network paddle: Support remote paddle input via UDP or TCP.
+- [ ] Hamlib/CAT fallback: Alternative to TCI for radios without TCI support.
+- [ ] Advanced error handling: More robust reconnect and diagnostics.
+- [ ] Customizable sidetone: Per-operator sidetone profiles and advanced audio settings.
+
+
 ## Hardware Requirements
 
 ### USB Paddle Input (Optional)
@@ -176,8 +209,22 @@ The configured message will be sent to TCI with `{callsign}` substituted.
 If USB paddle is connected:
 - Press dit/dah paddles
 - Local sidetone provides instant feedback (if enabled)
-- Key state sent to radio via TCI KEYER command
-- Break-In handles PTT and CW carrier generation
+- Application enables TX via TCI, then sends KEYER commands
+- Iambic timing generated locally with configurable speed
+
+**TX Settle Time:**
+When you touch the paddle, the application sends `TRX:true` to enable TX, then waits
+`tx_settle_time` (default 10-100ms) before sending the first KEYER command. This allows
+ExpertSDR3 to fully switch to TX mode. Without this delay, the first dit/dah may be
+clipped or lost.
+
+```yaml
+cw:
+  tx_settle_time: 0.050  # 50ms - adjust if first elements are clipped
+```
+
+**Sidetone:** Local sidetone starts with the first KEYER command (after TX settle time),
+so audio is synchronized with actual transmission.
 
 ### Stop the Controller
 
@@ -207,8 +254,17 @@ tci:
 cw:
   default_mode: "CW"       # CW, CWL, or CWU
   speed_wpm: 25            # Words per minute (for USB paddle keying only)
-  keyer_mode: "straight"   # straight, iambic-a, iambic-b
+  keyer_mode: "iambic-b"   # straight, iambic-a, iambic-b
+  tx_settle_time: 0.050    # Seconds to wait after TX enable before keying
 ```
+
+**TX Settle Time (`tx_settle_time`):**
+- Time in seconds to wait after enabling TX before first KEYER command
+- Required because ExpertSDR3 needs time to switch RX→TX
+- Too low = first dit/dah clipped or lost
+- Too high = noticeable delay when starting to key
+- Typical values: 0.10-0.150 (10-150ms)
+- Start with 0.050 and reduce if latency bothers you
 
 **Important: CW Speed Configuration**
 - **F-key macros:** Speed controlled by **ExpertSDR3's internal CW speed setting**
@@ -425,33 +481,3 @@ asyncio.run(test())
 "
 ```
 
-## Known Limitations
-
-### TX Spectrum Display (KEYER command)
-
-When using manual paddle keying via the TCI `KEYER` command, the **TX spectrum in ExpertSDR3 may not show the CW carrier**, even though the CW signal is actually being transmitted.
-
-**Observed behavior:**
-- Radio goes to TX mode (TX indicator lit)
-- CW carrier is transmitted (verified on separate receiver)
-- TX spectrum display shows no carrier/signal
-
-**Why this happens:**
-- `cw_macros`: Uses ExpertSDR3's internal CW generator → carrier appears in TX spectrum
-- `KEYER`: External key state notification → carrier may be injected at a later stage in the TX chain, bypassing the spectrum visualization point
-
-**Status:** This is a display issue in ExpertSDR3, not a functional problem. The CW is transmitted correctly. May be raised with Expert Electronics support.
-
-## ToDo / Feature Wishlist
-
-- [ ] **Send as you write**: Option to transmit CW in real-time as you type, not just via macros or paddle.
-- [ ] **Quick "Repeat last sent" button**: Instantly resend the last transmitted message.
-- [ ] **Graphical User Interface (GUI)**: User-friendly interface for configuration, macro editing, and live status.
-- [ ] **Windows support**: Port application for Windows, including USB HID and audio compatibility.
-- [ ] PTT hold timer.
-- [ ] Macro editor: Edit F-key macros from the GUI without editing YAML.
-- [ ] Contest mode: Add QSO numbering, serials, and contest logging features.
-- [ ] Network paddle: Support remote paddle input via UDP or TCP.
-- [ ] Hamlib/CAT fallback: Alternative to TCI for radios without TCI support.
-- [ ] Advanced error handling: More robust reconnect and diagnostics.
-- [ ] Customizable sidetone: Per-operator sidetone profiles and advanced audio settings.

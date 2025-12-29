@@ -17,16 +17,16 @@ operator:
 # CW settings
 cw:
   default_mode: "CW"       # Default mode: CW, CWL, or CWU
-  speed_wpm: 15            # CW speed for USB paddle keying (words per minute)
+  speed_wpm: 25            # CW speed for USB paddle keying (words per minute)
                            # NOTE: F-key macros use ExpertSDR3's internal CW speed setting,
                            # not this value. Set macro speed in ExpertSDR3 → Settings → CW.
                            # This speed_wpm only affects manual paddle keying timing.
   keyer_mode: "iambic-b"   # Keyer mode: straight, iambic-a, iambic-b
-  tx_settle_time: 0.050    # Seconds to wait after TRX enable before first KEYER command
+  tx_settle_time: 0.030    # Seconds to wait after TRX enable before first KEYER command
                            # This allows ExpertSDR3 to fully switch to TX mode.
                            # Too low = first dit/dah gets clipped or lost
                            # Too high = noticeable delay when starting to key
-                           # Typical values: 0.050-0.150 (50-150ms)
+                           # Typical values: 0.010-0.100 (10-100ms)
 
 # Sidetone settings (for USB paddle manual keying)
 sidetone:
@@ -47,17 +47,17 @@ usb_hid:
 # Use {callsign} for substitution
 # Special characters: > = faster, < = slower, |SK| = prosign
 # NOTE: Macro speed is controlled by ExpertSDR3's CW speed setting, NOT config.yaml speed_wpm.
-# To change F-key macro speed: ExpertSDR3 → Settings → CW → Speed (WPM)
+# To change F-key macro speed: ExpertSDR3 → Break.in → Macros speed
 function_keys:
   F1: "CQ CQ CQ DE {callsign} {callsign} K"
-  F2: "DE {callsign} K"
+  F2: "{callsign}"
   F3: "{callsign} 599"
   F4: "TU 73 DE {callsign}"
   F5: "QRZ? DE {callsign} K"
   F6: "PSE QRS"
   F7: "QRL?"
   F8: "TEST DE {callsign}"
-  F9: ""  # Not assigned
+  F9: "TEST"
   F10: "" # Not assigned
   F11: "" # Not assigned
   F12: "" # Not assigned
