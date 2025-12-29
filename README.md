@@ -15,20 +15,19 @@ Python application for controlling SunSDR radios via TCI (Transceiver Command In
 - Press F1-F12 to send pre-configured CW messages
 - Automatic callsign substitution using `{callsign}` placeholder
 - Text-to-morse conversion handled by ExpertSDR3/TCI
-- Special characters supported: `>` (faster), `<` (slower), `|SK|` (prosigns)
 
 ### USB Paddle Manual Keying
 - Connect CW paddle via XIAO SAMD21 USB HID interface
-- Accurate timing measurement (<1ms precision)
+- Accurate timing measurement
 - Local sidetone for instant feedback (no network latency)
 - Straight key mode (paddle states sent to TCI)
-- Optional iambic keyer support (if TCI doesn't handle it)
+- Optional iambic keyer support
 
 ### TCI Protocol
 - WebSocket connection to ExpertSDR3 TCI server
 - Configurable host and port
 - Auto-reconnection on disconnect
-- Supports multiple transceivers
+- Supports multiple transceivers (Not tested)
 
 ## Known Limitations
 
@@ -44,7 +43,7 @@ When using manual paddle keying via the TCI `KEYER` command, the **TX spectrum i
 
 **Why this happens:**
 - `cw_macros`: Uses ExpertSDR3's internal CW generator → carrier appears in TX spectrum
-- `KEYER`: External key state notification → carrier may be injected at a later stage in the TX chain, bypassing the spectrum visualization point
+- `KEYER`: External key state notification → carrier may be injected at a later stage in the TX chain(?), bypassing the spectrum visualization point
 
 **Status:** This is a display issue in ExpertSDR3, not a functional problem. The CW is transmitted correctly. May be raised with Expert Electronics support.
 
@@ -101,7 +100,7 @@ Dependencies:
 
 ### 2. Flash XIAO Firmware (USB Paddle Only)
 
-If using USB paddle input:
+If using USB keyer input:
 
 1. Install Arduino IDE 2.x
 2. Add Seeeduino SAMD boards:
@@ -144,7 +143,7 @@ Edit [config.yaml](config.yaml):
 # Radio connection
 tci:
   host: "localhost"      # TCI server IP
-  port: 40001            # TCI port (check ExpertSDR3 settings)
+  port: 40001            # TCI port (check ExpertSDR3 TCI server settings)
   
 # Operator info
 operator:
@@ -268,15 +267,15 @@ cw:
 
 **Important: CW Speed Configuration**
 - **F-key macros:** Speed controlled by **ExpertSDR3's internal CW speed setting**
-  - Change in: ExpertSDR3 → Settings → CW → Speed (WPM)
+  - Change in: ExpertSDR3 → Break.in → Macros speed
   - The `speed_wpm` value in config.yaml does **not** affect F-key macro speed
 - **USB paddle keying:** Speed controlled by `speed_wpm` in config.yaml
   - This sets the timing for iambic keyer element generation
   - Match this to ExpertSDR3's speed for consistent timing between macros and paddle
 
 **Keyer Mode:**
-- `straight` - Send raw paddle states to TCI (recommended - test first)
-- `iambic-a` - Client-side iambic Mode A (if TCI doesn't handle it)
+- `straight` - Send raw paddle states to TCI
+- `iambic-a` - Client-side iambic Mode A (Not tested yet)
 - `iambic-b` - Client-side iambic Mode B with paddle memory
 
 ### USB HID Settings
@@ -304,15 +303,6 @@ function_keys:
   F8: "TEST DE {callsign}"
   F9: ""  # Not assigned
 ```
-
-**Special Characters:**
-- `{callsign}` - Replaced with your callsign
-- `>` - Increase speed by 5 WPM (within ExpertSDR3)
-- `<` - Decrease speed by 5 WPM (within ExpertSDR3)
-- `|SK|` - Send prosign (combine letters)
-- `|AR|`, `|BT|`, etc.
-
-**Note:** The `>` and `<` speed changes affect ExpertSDR3's internal CW speed setting, which controls F-key macro speed but not USB paddle speed.
 
 **Reserved Characters** (automatically escaped):
 - `:` becomes `^`
@@ -374,14 +364,14 @@ function_keys:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    main.py                          │
-│              (TCICWController)                      │
-│                                                     │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────┐ │
-│  │ TCI Client  │  │  F-Key       │  │ USB       │ │
-│  │ (WebSocket) │  │  Handler     │  │ Paddle    │ │
-│  └──────┬──────┘  └──────┬───────┘  └─────┬─────┘ │
+┌────────────────────────────────────────────────────┐
+│                    main.py                         │
+│              (TCI CW Controller)                   │
+│                                                    │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────┐  │
+│  │ TCI Client  │  │  F-Key       │  │ USB       │  │
+│  │ (WebSocket) │  │  Handler     │  │ Paddle    │  │
+│  └──────┬──────┘  └──────┬───────┘  └─────┬─────┘  │
 │         │                │                 │       │
 └─────────┼────────────────┼─────────────────┼───────┘
           │                │                 │
