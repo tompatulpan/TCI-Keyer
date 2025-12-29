@@ -250,6 +250,7 @@ class TCIClient:
             transmit: True for TX, False for RX
         """
         state = "true" if transmit else "false"
+        self.logger.debug(f"Sending TRX command: TRX:{self.trx_number},{state}")
         await self.send_command(f"TRX:{self.trx_number},{state}")
     
     async def set_ptt(self, transmit: bool):

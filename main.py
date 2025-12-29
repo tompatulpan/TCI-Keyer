@@ -312,6 +312,8 @@ class TCICWController:
             return
         
         if not self.paddle_ptt_active:
+            self.logger.debug("Arming TX for paddle keying")
+            
             # Switch to CW mode if currently in a different mode (e.g., after band change)
             if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
                 self.logger.debug(f"Mode is {self.tci_client.current_mode}, switching to CW")
@@ -327,6 +329,8 @@ class TCICWController:
             await asyncio.sleep(tx_settle_time)
             
             self.logger.debug(f"TX pre-armed (mode={self.tci_client.current_mode}, settle={tx_settle_time*1000:.0f}ms)")
+        else:
+            self.logger.debug("TX already armed, skipping")
     
     async def _release_paddle_ptt_after_hangtime(self):
         """Release paddle PTT after hangtime delay"""
