@@ -53,6 +53,7 @@ When using manual paddle keying via the TCI `KEYER` command, the **TX spectrum i
 - [ ] **Quick "Repeat last sent" button**: Instantly resend the last transmitted message.
 - [ ] **Graphical User Interface (GUI)**: User-friendly interface for configuration, macro editing, and live status.
 - [ ] **Windows support**: Port application for Windows, including USB HID and audio compatibility.
+- [ ] Speed control.
 - [ ] PTT hold timer.
 - [ ] Macro editor: Edit F-key macros from the GUI without editing YAML.
 - [ ] Contest mode: Add QSO numbering, serials, and contest logging features.
@@ -405,7 +406,7 @@ MIT License
 
 ## Credits
 
-- USB HID implementation inspired by the Vail-CW adapter project
+- Implementation inspired by the Vail-CW adapter project - https://github.com/Vail-CW
 - TCI protocol specification from ExpertSDR3 - https://github.com/ExpertSDR3/TCI
 
 ## Support
