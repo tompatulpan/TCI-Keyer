@@ -21,11 +21,10 @@ cw:
                            # NOTE: F-key macros use ExpertSDR3's internal CW speed setting,
                            # not this value. Set macro speed in ExpertSDR3 → Settings → CW.
                            # This speed_wpm only affects manual paddle keying timing.
-  keyer_mode: "straight"   # Keyer mode: straight, iambic-a, iambic-b
-                           # IMPORTANT: "straight" mode REQUIRES Break-in enabled in ExpertSDR3!
-                           #            Without Break-in, TX activates but no CW carrier is generated.
-                           # RECOMMENDED: Use "iambic_a" or "iambic_b" for reliable operation
-                           #              without Break-in dependency.
+  keyer_mode: "iambic-b"   # Keyer mode: straight, iambic-a, iambic-b
+                           # straight: Either paddle = key down (no iambic logic)
+                           # iambic_a/b: Full iambic keyer with squeeze and memory
+                           # Both modes work identically - no Break-in required!
   tx_settle_time: 0.030    # Seconds to wait after TRX enable before first KEYER command
                            # This allows ExpertSDR3 to fully switch to TX mode.
                            # Too low = first dit/dah gets clipped or lost

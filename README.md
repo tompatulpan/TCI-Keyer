@@ -79,7 +79,8 @@ See the [USB_HID README](https://github.com/tompatulpan/duration-encoded-cw-prot
 
 ### You can also use the **Vail adapter**
 See this - https://vailadapter.com/
-Or build one your self - https://github.com/Vail-CW/vail-adapter
+
+**Note** Will require the same firmware as the HID interface.
 
 ## Software Requirements
 
