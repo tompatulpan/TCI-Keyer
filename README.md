@@ -75,7 +75,11 @@ When using manual paddle keying via the TCI `KEYER` command, the **TX spectrum i
 - D1 (PA04) → Dah paddle
 - GND → Common ground
 
-See See the [USB_HID README](https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID/README.md) for detailed wiring.
+See the [USB_HID README](https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID/README.md) for detailed wiring.
+
+### You can also use the **Vail adapter**
+See this - https://vailadapter.com/
+Or build one your self - https://github.com/Vail-CW/vail-adapter
 
 ## Software Requirements
 
