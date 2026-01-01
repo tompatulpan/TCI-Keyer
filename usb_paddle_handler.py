@@ -19,7 +19,8 @@ class USBPaddleHandler:
     def __init__(self, device_path: Optional[str] = None, 
                  vendor_id: str = "2886", product_id: str = "802f",
                  keyer_mode: str = "straight", wpm: int = 20,
-                 debug: bool = False):
+                 debug: bool = False,
+                 use_vail_firmware: bool = False):
         """
         Initialize USB paddle handler
         
@@ -27,9 +28,11 @@ class USBPaddleHandler:
             device_path: Explicit device path or None for auto-detect
             vendor_id: USB Vendor ID
             product_id: USB Product ID
-            keyer_mode: 'straight', 'iambic-a', or 'iambic-b'
-            wpm: Words per minute for iambic keyer
+            keyer_mode: 'straight', 'iambic-a', or 'iambic-b' (ignored if use_vail_firmware=True)
+            wpm: Words per minute for iambic keyer (ignored if use_vail_firmware=True)
             debug: Enable debug output
+            use_vail_firmware: If True, expects Vail adapter firmware to handle keying logic
+                              Python will treat output as "straight key" mode (measure timing only)
         """
         self.hid_reader = XiaoHIDReader(
             device_path=device_path,
@@ -41,12 +44,18 @@ class USBPaddleHandler:
         self.running = False
         self.poll_interval = 0.001  # 1ms polling
         self.keyer_mode = keyer_mode.lower()
+        self.use_vail_firmware = use_vail_firmware
         
-        # Initialize iambic keyer if needed
+        # Initialize logger first (needed for messages below)
+        self.logger = logging.getLogger("USBPaddleHandler")
+        
+        # Initialize iambic keyer if needed (NOT used with Vail firmware)
         self.iambic_keyer = None
-        if self.keyer_mode in ['iambic-a', 'iambic-b']:
+        if not use_vail_firmware and self.keyer_mode in ['iambic-a', 'iambic-b']:
             mode_letter = 'B' if self.keyer_mode == 'iambic-b' else 'A'
             self.iambic_keyer = IambicKeyer(wpm=wpm, mode=mode_letter)
+        elif use_vail_firmware:
+            self.logger.info("Using Vail adapter firmware for keyer logic (Python measures timing only)")
         
         # Timing state (for straight key mode)
         self.key_down = False
@@ -56,8 +65,6 @@ class USBPaddleHandler:
         # Callbacks
         self.on_key_event: Optional[Callable[[bool, int], None]] = None  # (key_down, prev_duration_ms)
         self.on_tx_start: Optional[Callable[[], None]] = None  # Called when keying starts (for TX pre-arm)
-        
-        self.logger = logging.getLogger("USBPaddleHandler")
     
     def connect(self) -> bool:
         """
@@ -82,13 +89,20 @@ class USBPaddleHandler:
         
         Supports:
         - straight: Either paddle = key down (no timing logic)
-        - iambic-a/b: Full iambic keyer with squeeze and memory
+        - iambic-a/b: Full iambic keyer with squeeze and memory (Python implementation)
+        - vail firmware: Firmware handles keying, Python measures timing (uses straight mode)
         """
         self.running = True
-        mode_display = self.keyer_mode.upper().replace('-', ' ')
+        
+        if self.use_vail_firmware:
+            mode_display = "VAIL FIRMWARE (Python measures timing only)"
+        else:
+            mode_display = self.keyer_mode.upper().replace('-', ' ')
+        
         self.logger.info(f"USB paddle polling started ({mode_display} mode)")
         
         # Choose appropriate loop based on mode
+        # Note: Vail firmware mode uses straight_poll_loop (firmware already generated timing)
         if self.iambic_keyer:
             await self._iambic_poll_loop()
         else:
@@ -99,6 +113,10 @@ class USBPaddleHandler:
     async def _straight_poll_loop(self):
         """
         Straight key mode: either paddle = key down
+        
+        Also used for Vail firmware mode - in that case, firmware has already
+        generated perfect iambic timing, and Python just measures what comes out
+        as Ctrl key presses (appears as "straight key" from Python's perspective).
         
         Uses the same TX pre-arming approach as iambic mode for reliability.
         """

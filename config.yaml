@@ -39,12 +39,49 @@ sidetone:
   # Note: F-key macros always use radio's sidetone (from ExpertSDR3)
 
 # USB HID settings (for physical morse key via XIAO SAMD21)
+# Supports two firmware options:
+#   1. Custom firmware (default) - Simple HID, Python handles keyer logic
+#   2. Vail adapter firmware (experimental) - Hardware keyer, 9 modes, MIDI control
+#      Enable via vail_adapter.enabled below
 usb_hid:
   enabled: true            # Enable USB paddle input
   device_path: null        # Auto-detect if null, or specify: /dev/hidraw0
   vendor_id: "2886"        # XIAO SAMD21 VID
   product_id: "802f"       # XIAO SAMD21 PID
   debug: false             # Enable HID debug output
+
+# Vail Adapter firmware configuration (EXPERIMENTAL)
+# Only enable if you've flashed Vail adapter v4.4 firmware to your XIAO SAMD21
+# Download: https://github.com/Vail-CW/vail-adapter/releases
+# Use xiao_basic_pcb_v2.uf2 (for PCB v2) or xiao_non_pcb.uf2 (direct wiring)
+# See VAIL_ADAPTER_INTEGRATION.md for complete setup instructions
+vail_adapter:
+  enabled: false            # Enable Vail adapter MIDI configuration at startup
+  
+  # Keyer mode (sent via MIDI Program Change)
+  # 0=Passthrough, 1=Straight, 2=Bug, 3=ElBug, 4=SingleDot,
+  # 5=Ultimatic, 6=Plain, 7=IambicA, 8=IambicB, 9=Keyahead
+  keyer_mode: 8            # 8 = Iambic B (most common)
+  
+  # Keyer speed (sent via MIDI CC1 at startup)
+  # This configures the firmware's internal keyer timing
+  # Overrides cw.speed_wpm when Vail adapter is enabled
+  speed_wpm: 25
+  
+  # Sidetone frequency as MIDI note number (sent via MIDI CC2)
+  # Common values: 60=C4 (261Hz), 68=G#4 (415Hz), 69=A4 (440Hz), 
+  #                72=C5 (523Hz), 76=E5 (659Hz)
+  # For 600 Hz use note 73
+  sidetone_note: 73        # ~600 Hz sidetone
+  
+  # Output mode (sent via MIDI CC0)
+  # keyboard: Use USB HID keyboard (Left/Right Ctrl keys) - RECOMMENDED
+  # midi: Use MIDI notes (C# and D for dit/dah) - for MIDI-aware apps
+  output_mode: "keyboard"  # Keep as keyboard for TCI controller
+  
+  # Dynamic speed control (optional)
+  # If true, speed changes via F11/F12 will send MIDI commands to adapter
+  allow_dynamic_speed: false
 
 # Function key CW macros (F1-F12)
 # Use {callsign} for substitution

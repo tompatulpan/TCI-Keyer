@@ -75,12 +75,32 @@ When using manual paddle keying via the TCI `KEYER` command, the **TX spectrum i
 - D1 (PA04) → Dah paddle
 - GND → Common ground
 
-See the [USB_HID README](https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID/README.md) for detailed wiring.
+### Firmware Options
 
-### You can also use the **Vail adapter**
+You can choose between two firmware options for the XIAO SAMD21:
+
+#### **Option 1: Custom Firmware (Default)**
+- Simple HID keyboard output (Left/Right Ctrl keys)
+- Python handles iambic keyer logic
+- Single keyer mode (Iambic A/B)
+- Configuration via config.yaml
+- See [USB_HID README](https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID/README.md) for wiring and firmware
+
+#### **Option 2: Vail Adapter Firmware (Experimental)**
+- **Status:** Experimental ⚠️
+- Hardware-based keyer logic (9 modes: straight, bug, iambic A/B, ultimatic, etc.)
+- MIDI control for speed/mode configuration
+- Settings stored in EEPROM (persist across reboots)
+- Hardware sidetone via piezo buzzer
+- Requires `vail_adapter.enabled: true` in config.yaml
+- See [VAIL_ADAPTER_INTEGRATION.md](VAIL_ADAPTER_INTEGRATION.md) for setup
+- Firmware: [Vail Adapter v4.4](https://github.com/Vail-CW/vail-adapter/releases)
+- **Note:** Works with basic PCB v2 (`xiao_basic_pcb_v2.uf2`) or non-PCB variant
+
+**Recommendation:** Start with **Option 1 (custom firmware)** for proven stability. Try Option 2 if you want hardware keyer features or plan to use with Vail web repeater.
 See this - https://vailadapter.com/
 
-**Note** Will require the same firmware as the HID interface.
+**Note.** Will require the same firmware as the HID interface.
 
 ## Software Requirements
 
