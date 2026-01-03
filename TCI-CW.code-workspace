@@ -1,0 +1,43 @@
+{
+    "folders": [
+        {
+            "path": "."
+        },
+        {
+            "path": "morse-pro"
+        },
+        // ...existing code...
+        {
+            "path": "/home/tomas/Documents/Projekt/CW/vail-adapter-lib/"
+        },
+        {
+            "path": "/home/tomas/Documents/Projekt/CW/protocol/"
+        },
+        {
+            "path": "/home/tomas/Documents/Projekt/CW/Vail_remote/"
+        }
+    ],
+    "settings": {
+        "python.pythonPath": "/usr/bin/python3",
+        "files.exclude": {
+            "**/__pycache__": true,
+            "**/*.pyc": true
+        },
+        "search.exclude": {
+            "**/__pycache__": true,
+            "**/*.pyc": true
+        },
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-toolsai.jupyter",
+            "eamodio.gitlens",
+            "esbenp.prettier-vscode"
+        ]
+    }
+}

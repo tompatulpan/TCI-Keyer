@@ -100,7 +100,6 @@ You can choose between two firmware options for the XIAO SAMD21:
 **Recommendation:** Start with **Option 1 (custom firmware)** for proven stability. Try Option 2 if you want hardware keyer features or plan to use with Vail web repeater.
 See this - https://vailadapter.com/
 
-**Note.** Will require the same firmware as the HID interface.
 
 ## Software Requirements
 

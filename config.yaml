@@ -66,7 +66,7 @@ vail_adapter:
   # Keyer speed (sent via MIDI CC1 at startup)
   # This configures the firmware's internal keyer timing
   # Overrides cw.speed_wpm when Vail adapter is enabled
-  speed_wpm: 25
+  speed_wpm: 35
   
   # Sidetone frequency as MIDI note number (sent via MIDI CC2)
   # Common values: 60=C4 (261Hz), 68=G#4 (415Hz), 69=A4 (440Hz), 

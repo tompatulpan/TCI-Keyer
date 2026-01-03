@@ -19,7 +19,6 @@ from tci_client import TCIClient
 from keyboard_handler import KeyboardHandler
 from usb_paddle_handler import USBPaddleHandler
 from sidetone_generator import SidetoneGenerator
-from vail_config import VailAdapterConfig, frequency_to_midi_note
 
 
 class TCICWController:
@@ -189,32 +188,44 @@ class TCICWController:
         self.logger.info("Configuring Vail adapter firmware via MIDI...")
         
         try:
+            from vail_adapter_lib.midi_config import VailAdapterConfig
+        except ImportError as e:
+            self.logger.error(f"vail-adapter-lib not installed: {e}")
+            self.logger.error("Install with: pip install -e ../vail-adapter-lib")
+            self.logger.warning("Adapter will use stored EEPROM settings - speed may be incorrect!")
+            return
+        
+        try:
             # Get configuration values
-            keyer_mode = vail_config.get('keyer_mode', 8)  # Default: Iambic B
+            keyer_mode = vail_config.get('keyer_mode', 8)
             speed_wpm = vail_config.get('speed_wpm', 25)
-            sidetone_note = vail_config.get('sidetone_note', 73)  # Default: ~600 Hz
+            sidetone_note = vail_config.get('sidetone_note', 73)
             output_mode = vail_config.get('output_mode', 'keyboard')
+            keyboard_mode = (output_mode == 'keyboard')
             
-            # Create config object and send MIDI commands
-            vail_adapter = VailAdapterConfig()
-            success = vail_adapter.configure_adapter(
+            # Configure adapter
+            configurator = VailAdapterConfig()
+            success = configurator.configure_adapter(
                 keyer_mode=keyer_mode,
                 speed_wpm=speed_wpm,
                 sidetone_note=sidetone_note,
-                keyboard_mode=(output_mode == 'keyboard')
+                keyboard_mode=keyboard_mode
             )
             
             if success:
-                keyer_names = VailAdapterConfig.KEYER_NAMES
+                keyer_names = {
+                    0: "Passthrough", 1: "Straight", 2: "Bug", 3: "ElBug",
+                    4: "SingleDot", 5: "Ultimatic", 6: "Plain",
+                    7: "IambicA", 8: "IambicB", 9: "Keyahead"
+                }
                 self.logger.info(f"Vail adapter configured: {keyer_names.get(keyer_mode, 'Unknown')} at {speed_wpm} WPM")
-                self.logger.info("Python will measure timing from firmware-generated keying")
             else:
                 self.logger.warning("Failed to configure Vail adapter - check MIDI connection")
-                self.logger.warning("Continuing anyway - adapter may be using stored EEPROM settings")
+                self.logger.warning("Adapter may be using stored EEPROM settings")
                 
         except Exception as e:
-            self.logger.error(f"Error configuring Vail adapter: {e}")
-            self.logger.warning("Continuing with default/EEPROM settings")
+            self.logger.error(f"Error configuring Vail adapter: {e}", exc_info=True)
+            self.logger.warning("Adapter will use stored EEPROM settings")
     
     def _initialize_sidetone(self) -> bool:
         """
