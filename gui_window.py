@@ -36,23 +36,23 @@ class TkinterGUI:
         self.loop = loop
         self.root = tk.Tk()
         self.root.title("TCI CW Controller")
-        self.root.geometry("800x600")
+        self.root.geometry("640x660")
         
         # Configuration cache (edited in memory, saved on button)
         self.config = controller.config.copy()
         
         # Status variables
         self.tci_status_var = tk.StringVar(value="Disconnected")
-        self.tci_color_var = tk.StringVar(value="red")
         self.usb_status_var = tk.StringVar(value="Disconnected")
-        self.usb_color_var = tk.StringVar(value="red")
+        self.usb_device_var = tk.StringVar(value="Unknown")
         self.active_macro_var = tk.StringVar(value="Idle")
         
         # Macro text widgets (for live editing)
         self.macro_entries = {}  # F1-F12 -> Text widget
-        self.macro_preview_labels = {}  # F1-F12 -> Label (with callsign substitution)
         
         # Setting variables (will be updated after controller initializes)
+        self.callsign_var = tk.StringVar(value="")
+        self.keyer_mode_var = tk.StringVar(value="iambic-b")
         self.cw_speed_var = tk.IntVar(value=25)
         self.sidetone_freq_var = tk.IntVar(value=600)
         self.sidetone_vol_var = tk.DoubleVar(value=50.0)
@@ -79,101 +79,107 @@ class TkinterGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         
-        # Three sections: Status, Macros, Settings
+        # Sections: Operator Info, Status, Macros, Settings
+        self._create_operator_frame(main_frame)
         self._create_status_frame(main_frame)
         self._create_macros_frame(main_frame)
         self._create_settings_frame(main_frame)
         
         # Bottom buttons
         self._create_bottom_buttons(main_frame)
-        
-    def _create_status_frame(self, parent):
-        """Status indicators for TCI and USB connections"""
-        frame = ttk.LabelFrame(parent, text="Status", padding="10")
+    
+    def _create_operator_frame(self, parent):
+        """Operator callsign and keyer mode selection"""
+        frame = ttk.LabelFrame(parent, text="Operator", padding="10")
         frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
         
-        # TCI Connection
-        ttk.Label(frame, text="TCI Server:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        # Callsign
+        ttk.Label(frame, text="Callsign:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        callsign_entry = ttk.Entry(frame, textvariable=self.callsign_var, width=12)
+        callsign_entry.grid(row=0, column=1, sticky=tk.W, padx=5)
+        self.callsign_var.trace_add('write', lambda *args: self._on_callsign_change())
+        
+        # Keyer Mode
+        ttk.Label(frame, text="Keyer Mode:").grid(row=0, column=2, sticky=tk.W, padx=(20, 5))
+        keyer_combo = ttk.Combobox(frame, textvariable=self.keyer_mode_var, width=12,
+                                   values=["straight", "iambic-a", "iambic-b"],
+                                   state="readonly")
+        keyer_combo.grid(row=0, column=3, sticky=tk.W, padx=5)
+        keyer_combo.bind('<<ComboboxSelected>>', self._on_keyer_mode_change)
+        
+    def _create_status_frame(self, parent):
+        """Compact status indicators"""
+        frame = ttk.LabelFrame(parent, text="Status", padding="5")
+        frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+        
+        # Status row
+        ttk.Label(frame, text="TCI:").grid(row=0, column=0, sticky=tk.W, padx=5)
         self.tci_indicator = tk.Label(frame, textvariable=self.tci_status_var, 
-                                      bg="red", fg="white", width=15, relief=tk.SUNKEN)
+                                      bg="red", fg="white", width=12, relief=tk.SUNKEN)
         self.tci_indicator.grid(row=0, column=1, padx=5)
         
-        # USB Paddle
-        ttk.Label(frame, text="USB Paddle:").grid(row=1, column=0, sticky=tk.W, padx=5)
+        ttk.Label(frame, text="USB:").grid(row=0, column=2, sticky=tk.W, padx=(15, 5))
         self.usb_indicator = tk.Label(frame, textvariable=self.usb_status_var,
-                                      bg="red", fg="white", width=15, relief=tk.SUNKEN)
-        self.usb_indicator.grid(row=1, column=1, padx=5)
+                                      bg="red", fg="white", width=12, relief=tk.SUNKEN)
+        self.usb_indicator.grid(row=0, column=3, padx=5)
         
-        # Active Macro
-        ttk.Label(frame, text="Active:").grid(row=2, column=0, sticky=tk.W, padx=5)
-        ttk.Label(frame, textvariable=self.active_macro_var, 
-                 font=('TkDefaultFont', 10, 'bold')).grid(row=2, column=1, sticky=tk.W, padx=5)
+        ttk.Label(frame, text="Device:").grid(row=0, column=4, sticky=tk.W, padx=(15, 5))
+        ttk.Label(frame, textvariable=self.usb_device_var,
+                 font=('TkDefaultFont', 9)).grid(row=0, column=5, sticky=tk.W, padx=5)
+        
+        ttk.Label(frame, text="Active:").grid(row=0, column=6, sticky=tk.W, padx=(15, 5))
+        ttk.Label(frame, textvariable=self.active_macro_var,
+                 font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=7, sticky=tk.W, padx=5)
         
     def _create_macros_frame(self, parent):
-        """F-key macro buttons and text editors"""
-        frame = ttk.LabelFrame(parent, text="F-Key Macros", padding="10")
-        frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
-        parent.rowconfigure(1, weight=1)
+        """Compact F-key macro buttons"""
+        frame = ttk.LabelFrame(parent, text="F-Key Macros (use {callsign} for substitution)", padding="10")
+        frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        parent.rowconfigure(2, weight=1)
         
-        # Create 12 macro editors (4 columns x 3 rows)
+        # Create 12 compact macro editors (2 columns x 6 rows)
         for i in range(1, 13):
-            row = (i - 1) // 4
-            col = (i - 1) % 4
+            row = (i - 1) // 2
+            col = (i - 1) % 2
             
             fkey = f"F{i}"
-            self._create_macro_editor(frame, fkey, row, col)
+            self._create_compact_macro_editor(frame, fkey, row, col)
             
-    def _create_macro_editor(self, parent, fkey, row, col):
-        """Create single F-key editor widget"""
-        # Container frame
+    def _create_compact_macro_editor(self, parent, fkey, row, col):
+        """Create compact F-key editor widget (button + entry only)"""
         container = ttk.Frame(parent)
         container.grid(row=row, column=col, padx=5, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Button to send macro
-        btn = ttk.Button(container, text=fkey, width=6,
+        btn = ttk.Button(container, text=fkey, width=5,
                         command=lambda: self._send_macro(fkey))
         btn.grid(row=0, column=0, sticky=tk.W)
         
-        # Text entry (single line)
-        text_widget = tk.Entry(container, width=30)
-        text_widget.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=2)
+        # Text entry (single line, compact)
+        text_widget = tk.Entry(container, width=18)
+        text_widget.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0))
         
         # Load current macro text
         current_text = self.config['function_keys'].get(fkey, "")
         text_widget.insert(0, current_text)
         
-        # Bind change event for preview update
-        text_widget.bind('<KeyRelease>', lambda e: self._update_preview(fkey))
-        
-        # Preview label (shows with callsign substitution)
-        preview = ttk.Label(container, text="", foreground="gray", font=('TkDefaultFont', 8))
-        preview.grid(row=2, column=0, sticky=tk.W)
-        
-        # Character count label
-        char_count = ttk.Label(container, text="", foreground="blue", font=('TkDefaultFont', 8))
-        char_count.grid(row=3, column=0, sticky=tk.W)
-        
-        # Store references
+        # Store reference
         self.macro_entries[fkey] = text_widget
-        self.macro_preview_labels[fkey] = (preview, char_count)
         
-        # Initial preview
-        self._update_preview(fkey)
-        
-        # Make column expandable
-        container.columnconfigure(0, weight=1)
+        # Make entry expandable
+        container.columnconfigure(1, weight=1)
         
     def _create_settings_frame(self, parent):
         """Live settings adjustment (sliders)"""
         frame = ttk.LabelFrame(parent, text="Settings", padding="10")
-        frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
+        frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=5)
         
         # CW Speed
         ttk.Label(frame, text="CW Speed (WPM):").grid(row=0, column=0, sticky=tk.W, padx=5)
         speed_scale = ttk.Scale(frame, from_=15, to=40, orient=tk.HORIZONTAL,
                                variable=self.cw_speed_var, command=lambda v: self._on_speed_change(v))
         speed_scale.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
-        self.speed_label = ttk.Label(frame, text=f"{self.cw_speed_var.get()} WPM")
+        self.speed_label = ttk.Label(frame, text=f"{self.cw_speed_var.get()} WPM", width=8)
         self.speed_label.grid(row=0, column=2, padx=5)
         
         # Sidetone Frequency
@@ -181,7 +187,7 @@ class TkinterGUI:
         freq_scale = ttk.Scale(frame, from_=400, to=800, orient=tk.HORIZONTAL,
                               variable=self.sidetone_freq_var, command=lambda v: self._on_freq_change(v))
         freq_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5)
-        self.freq_label = ttk.Label(frame, text=f"{self.sidetone_freq_var.get()} Hz")
+        self.freq_label = ttk.Label(frame, text=f"{self.sidetone_freq_var.get()} Hz", width=8)
         self.freq_label.grid(row=1, column=2, padx=5)
         
         # Sidetone Volume
@@ -189,13 +195,8 @@ class TkinterGUI:
         vol_scale = ttk.Scale(frame, from_=0, to=100, orient=tk.HORIZONTAL,
                              variable=self.sidetone_vol_var, command=lambda v: self._on_volume_change(v))
         vol_scale.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5)
-        self.vol_label = ttk.Label(frame, text=f"{self.sidetone_vol_var.get():.0f}%")
+        self.vol_label = ttk.Label(frame, text=f"{self.sidetone_vol_var.get():.0f}%", width=8)
         self.vol_label.grid(row=2, column=2, padx=5)
-        
-        # Note about Vail adapter
-        note_label = ttk.Label(frame, text="Note: Vail adapter sidetone updates require firmware reset",
-                              foreground="gray", font=('TkDefaultFont', 8))
-        note_label.grid(row=3, column=0, columnspan=3, sticky=tk.W, padx=5, pady=(5,0))
         
         # Make sliders expandable
         frame.columnconfigure(1, weight=1)
@@ -203,7 +204,7 @@ class TkinterGUI:
     def _create_bottom_buttons(self, parent):
         """Save/Load/Quit buttons"""
         button_frame = ttk.Frame(parent)
-        button_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=10)
+        button_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=10)
         
         ttk.Button(button_frame, text="Save Config", 
                   command=self._save_config).pack(side=tk.LEFT, padx=5)
@@ -215,10 +216,14 @@ class TkinterGUI:
     # Callbacks
     
     def _load_initial_values(self):
-        """Load initial slider values from controller after initialization"""
+        """Load initial values from controller after initialization"""
         try:
             # Reload config from controller
             self.config = self.controller.config.copy()
+            
+            # Update callsign and keyer mode
+            self.callsign_var.set(self.config['operator']['callsign'])
+            self.keyer_mode_var.set(self.config['cw']['keyer_mode'])
             
             # Update slider values
             self.cw_speed_var.set(self.config['cw']['speed_wpm'])
@@ -230,36 +235,34 @@ class TkinterGUI:
             self.freq_label.config(text=f"{self.sidetone_freq_var.get()} Hz")
             self.vol_label.config(text=f"{self.sidetone_vol_var.get():.0f}%")
             
-            logger.info(f"[GUI] Loaded initial values: {self.cw_speed_var.get()} WPM, "
-                       f"{self.sidetone_freq_var.get()} Hz, {self.sidetone_vol_var.get():.0f}%")
+            logger.info(f"[GUI] Loaded initial values: {self.callsign_var.get()}, "
+                       f"{self.keyer_mode_var.get()}, {self.cw_speed_var.get()} WPM")
         except Exception as e:
             logger.error(f"[GUI] Error loading initial values: {e}")
     
-    def _update_preview(self, fkey):
-        """Update preview label with callsign substitution and character count"""
-        text_widget = self.macro_entries[fkey]
-        preview_label, char_label = self.macro_preview_labels[fkey]
+    def _on_callsign_change(self):
+        """Callsign entry changed"""
+        new_callsign = self.callsign_var.get().upper()
+        self.config['operator']['callsign'] = new_callsign
+        logger.debug(f"[GUI] Callsign changed to: {new_callsign}")
+    
+    def _on_keyer_mode_change(self, event=None):
+        """Keyer mode combo changed - saves to config, requires restart"""
+        new_mode = self.keyer_mode_var.get()
+        old_mode = self.config['cw']['keyer_mode']
         
-        text = text_widget.get()
-        
-        # Substitute callsign
-        callsign = self.config['operator']['callsign']
-        preview_text = text.replace('{callsign}', callsign)
-        
-        # Update preview
-        if preview_text:
-            preview_label.config(text=f"Preview: {preview_text}")
-        else:
-            preview_label.config(text="(empty)")
+        if new_mode != old_mode:
+            self.config['cw']['keyer_mode'] = new_mode
+            logger.info(f"[GUI] Keyer mode changed to: {new_mode} (save config and restart to apply)")
             
-        # Character count and warning
-        char_count = len(preview_text)
-        if char_count > 100:
-            char_label.config(text=f"{char_count} chars (⚠ long message)", foreground="red")
-        elif char_count > 50:
-            char_label.config(text=f"{char_count} chars (caution)", foreground="orange")
-        else:
-            char_label.config(text=f"{char_count} chars", foreground="blue")
+            # Show info message
+            messagebox.showinfo("Keyer Mode Changed", 
+                              f"Keyer mode set to {new_mode}\n\n"
+                              "Save config and restart application to apply.")
+    
+    def _update_preview(self, fkey):
+        """Update preview label with callsign substitution (removed - for compact GUI)"""
+        pass
             
     def _send_macro(self, fkey):
         """Send F-key macro via controller"""
@@ -358,12 +361,20 @@ class TkinterGUI:
     def _save_config(self):
         """Save current config to file"""
         # Update config dict from UI widgets
+        self.config['operator']['callsign'] = self.callsign_var.get().upper()
+        self.config['cw']['keyer_mode'] = self.keyer_mode_var.get()
+        
         for fkey, text_widget in self.macro_entries.items():
             self.config['function_keys'][fkey] = text_widget.get()
             
         self.config['cw']['speed_wpm'] = self.cw_speed_var.get()
         self.config['sidetone']['frequency'] = self.sidetone_freq_var.get()
         self.config['sidetone']['volume'] = self.sidetone_vol_var.get() / 100.0
+        
+        # Sync Vail adapter settings with main CW settings (if vail_adapter section exists)
+        if 'vail_adapter' in self.config:
+            self.config['vail_adapter']['speed_wpm'] = self.cw_speed_var.get()
+            # Note: keyer_mode is now derived from cw.keyer_mode in main.py
         
         # Save via controller
         future = asyncio.run_coroutine_threadsafe(
@@ -397,10 +408,12 @@ class TkinterGUI:
             self.config = new_config.copy()
             
             # Update UI widgets
+            self.callsign_var.set(self.config['operator']['callsign'])
+            self.keyer_mode_var.set(self.config['cw']['keyer_mode'])
+            
             for fkey, text_widget in self.macro_entries.items():
                 text_widget.delete(0, tk.END)
                 text_widget.insert(0, self.config['function_keys'].get(fkey, ""))
-                self._update_preview(fkey)
                 
             # Update slider values
             self.cw_speed_var.set(self.config['cw']['speed_wpm'])
@@ -458,13 +471,21 @@ class TkinterGUI:
                 self.tci_status_var.set("Disconnected")
                 self.tci_indicator.config(bg="red")
                 
-            # USB paddle status
+            # USB paddle status and device type
             if self.controller.usb_paddle_handler and self.controller.usb_paddle_handler.running:
                 self.usb_status_var.set("Connected")
                 self.usb_indicator.config(bg="green")
+                
+                # Determine device type
+                vail_enabled = self.config.get('vail_adapter', {}).get('enabled', False)
+                if vail_enabled:
+                    self.usb_device_var.set("Vail Adapter")
+                else:
+                    self.usb_device_var.set("Legacy (Python iambic)")
             else:
                 self.usb_status_var.set("Disconnected")
                 self.usb_indicator.config(bg="red")
+                self.usb_device_var.set("None")
                 
         except Exception as e:
             logger.error(f"[GUI] Status update error: {e}")

@@ -204,9 +204,20 @@ class TCICWController:
             return
         
         try:
-            # Get configuration values
-            keyer_mode = vail_config.get('keyer_mode', 8)
-            speed_wpm = vail_config.get('speed_wpm', 25)
+            # Get configuration values - use cw.keyer_mode as master setting
+            keyer_mode_str = self.config['cw'].get('keyer_mode', 'iambic-b')
+            
+            # Map string keyer mode to Vail firmware mode number
+            keyer_mode_map = {
+                'straight': 1,
+                'iambic-a': 7,
+                'iambic-b': 8,
+                'iambic_a': 7,  # Alternative format
+                'iambic_b': 8,  # Alternative format
+            }
+            keyer_mode = keyer_mode_map.get(keyer_mode_str.lower(), 8)  # Default to iambic-b
+            
+            speed_wpm = self.config['cw'].get('speed_wpm', 25)
             sidetone_note = vail_config.get('sidetone_note', 73)
             output_mode = vail_config.get('output_mode', 'keyboard')
             keyboard_mode = (output_mode == 'keyboard')
