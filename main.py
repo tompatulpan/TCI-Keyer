@@ -52,6 +52,11 @@ class TCICWController:
         self.paddle_ptt_active = False
         self.paddle_ptt_hangtime = 1.0  # Seconds to keep PTT active after last key-up
         self.paddle_ptt_release_task = None
+        
+        # Vail firmware event buffering (50ms delay to allow TX settle)
+        self.vail_event_buffer = []
+        self.vail_buffer_task = None
+        self.vail_tx_armed_time = None
     
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file"""
@@ -164,6 +169,9 @@ class TCICWController:
         # Configure Vail adapter firmware if enabled
         if use_vail_firmware:
             self._configure_vail_adapter(vail_config)
+            self.use_vail_firmware = True
+        else:
+            self.use_vail_firmware = False
         
         # Setup callbacks
         self.usb_paddle_handler.on_key_event = self._on_paddle_event
@@ -258,6 +266,11 @@ class TCICWController:
     def _on_tci_ready(self):
         """Callback when TCI server is ready"""
         self.logger.info("TCI server ready")
+        
+        # Pre-arm TX for Vail firmware to prevent first element clipping
+        if hasattr(self, 'use_vail_firmware') and self.use_vail_firmware:
+            asyncio.create_task(self._pre_arm_vail_tx())
+        
         print("\n" + "="*60)
         print("TCI CW CONTROLLER READY")
         print("="*60)
@@ -480,30 +493,112 @@ class TCICWController:
             previous_duration_ms: Duration of the previous state in milliseconds
                                   (used by TCI protocol for timing reconstruction)
         
-        Note: TX is pre-armed in _on_paddle_tx_start before the first element,
-              so KEYER commands here are sent with TX already active.
+        Note: For iambic mode, TX is pre-armed in _on_paddle_tx_start before first element.
+        Note: For Vail firmware mode, events are buffered 50ms to allow TX settle.
         Note: Sidetone is handled in usb_paddle_handler for minimal latency.
         """
         # Send to TCI
         if self.tci_client and self.tci_client.ready:
-            # Cancel any pending PTT release when new keying starts
-            if self.paddle_ptt_release_task and key_down:
-                self.paddle_ptt_release_task.cancel()
-                self.paddle_ptt_release_task = None
-            
-            # Send KEYER command (TX already armed by on_tx_start callback)
-            await self.tci_client.send_keyer(key_down, previous_duration_ms)
-            
-            # Schedule PTT release after key-up with hangtime
-            if not key_down and self.paddle_ptt_active:
-                # Cancel any previous release task
-                if self.paddle_ptt_release_task:
-                    self.paddle_ptt_release_task.cancel()
+            # For Vail firmware: buffer events with 50ms delay for TX settle
+            if hasattr(self, 'use_vail_firmware') and self.use_vail_firmware:
+                # On first key-down, arm TX and start buffer processing
+                if key_down and not self.paddle_ptt_active:
+                    # Switch to CW mode if needed
+                    if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
+                        await self.tci_client.set_mode_cw()
+                    
+                    # Enable TX immediately
+                    await self.tci_client.set_ptt(True)
+                    self.paddle_ptt_active = True
+                    self.vail_tx_armed_time = asyncio.get_event_loop().time()
+                    self.logger.debug("Vail: TX armed, buffering events for 50ms settle")
                 
-                # Schedule new release after hangtime
-                self.paddle_ptt_release_task = asyncio.create_task(
-                    self._release_paddle_ptt_after_hangtime()
-                )
+                # Buffer the event with timestamp
+                event_time = asyncio.get_event_loop().time()
+                self.vail_event_buffer.append((key_down, previous_duration_ms, event_time))
+                
+                # Start buffer processing task if not running
+                if self.vail_buffer_task is None or self.vail_buffer_task.done():
+                    self.vail_buffer_task = asyncio.create_task(self._process_vail_buffer())
+                
+                # Cancel PTT release on new keying
+                if self.paddle_ptt_release_task and key_down:
+                    self.paddle_ptt_release_task.cancel()
+                    self.paddle_ptt_release_task = None
+                
+                # Schedule PTT release after key-up
+                if not key_down and self.paddle_ptt_active:
+                    if self.paddle_ptt_release_task:
+                        self.paddle_ptt_release_task.cancel()
+                    self.paddle_ptt_release_task = asyncio.create_task(
+                        self._release_paddle_ptt_after_hangtime()
+                    )
+                
+            else:
+                # For Python iambic: normal processing
+                force_ptt = False
+                settle_time_ms = 0
+                
+                if key_down and not self.paddle_ptt_active:
+                    # Switch to CW mode if needed
+                    if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
+                        await self.tci_client.set_mode_cw()
+                    
+                    # Python iambic: use force_ptt in send_keyer for first element
+                    force_ptt = self.config['tci'].get('force_ptt', False)
+                    if not force_ptt:
+                        await self.tci_client.set_ptt(True)
+                    else:
+                        # Settle time will be applied in send_keyer
+                        settle_time_ms = int(self.config['cw'].get('tx_settle_time', 0.050) * 1000)
+                    self.logger.debug("TX enabled for paddle keying")
+                    
+                    self.paddle_ptt_active = True
+                
+                # Cancel any pending PTT release when new keying starts
+                if self.paddle_ptt_release_task and key_down:
+                    self.paddle_ptt_release_task.cancel()
+                    self.paddle_ptt_release_task = None
+                
+                # Send KEYER command (settle delay only for Python iambic first element)
+                await self.tci_client.send_keyer(key_down, previous_duration_ms, 
+                                                force_ptt=force_ptt, 
+                                                settle_time_ms=settle_time_ms)
+                
+                # Schedule PTT release after key-up with hangtime
+                if not key_down and self.paddle_ptt_active:
+                    if self.paddle_ptt_release_task:
+                        self.paddle_ptt_release_task.cancel()
+                    
+                    self.paddle_ptt_release_task = asyncio.create_task(
+                        self._release_paddle_ptt_after_hangtime()
+                    )
+    
+    async def _process_vail_buffer(self):
+        """Process buffered Vail firmware events - entire stream delayed 50ms"""
+        try:
+            tx_settle_time = self.config['cw'].get('tx_settle_time', 0.050)
+            
+            while self.vail_event_buffer:
+                key_down, previous_duration_ms, event_time = self.vail_event_buffer[0]
+                
+                # Wait until 50ms after event arrived (constant delay for entire stream)
+                target_send_time = event_time + tx_settle_time
+                now = asyncio.get_event_loop().time()
+                delay = max(0, target_send_time - now)
+                
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                
+                # Send the event with original timing preserved
+                await self.tci_client.send_keyer(key_down, previous_duration_ms, 
+                                                force_ptt=False, settle_time_ms=0)
+                
+                # Remove from buffer
+                self.vail_event_buffer.pop(0)
+                
+        except Exception as e:
+            self.logger.error(f"Error processing Vail buffer: {e}")
     
     async def _on_paddle_tx_start(self):
         """
@@ -542,6 +637,26 @@ class TCICWController:
             self.logger.debug(f"TX pre-armed (mode={self.tci_client.current_mode}, settle={tx_settle_time*1000:.0f}ms)")
         else:
             self.logger.debug("TX already armed, skipping")
+    
+    async def _pre_arm_vail_tx(self):
+        """Pre-arm TX for Vail firmware at startup to prevent first element clipping"""
+        try:
+            await asyncio.sleep(0.5)  # Wait for TCI to stabilize
+            
+            if self.tci_client and self.tci_client.ready:
+                # Set CW mode
+                if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
+                    await self.tci_client.set_mode_cw()
+                
+                # Enable TX and wait for settle
+                await self.tci_client.set_ptt(True)
+                tx_settle_time = self.config['cw'].get('tx_settle_time', 0.050)
+                await asyncio.sleep(tx_settle_time)
+                
+                self.paddle_ptt_active = True
+                self.logger.info(f"Vail firmware: TX pre-armed at startup (settle={tx_settle_time*1000:.0f}ms)")
+        except Exception as e:
+            self.logger.error(f"Failed to pre-arm TX for Vail firmware: {e}")
     
     async def _release_paddle_ptt_after_hangtime(self):
         """Release paddle PTT after hangtime delay"""

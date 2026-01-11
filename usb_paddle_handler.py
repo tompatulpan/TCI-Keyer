@@ -134,46 +134,12 @@ class USBPaddleHandler:
         
         Uses the same TX pre-arming approach as iambic mode for reliability.
         """
-        # Timing state for TCI protocol (same as iambic mode)
+        # Timing state for TCI protocol
         last_event_time = time.time()
         transmission_start = None
-        tx_armed = False
         
         # Get sidetone reference (set by main.py)
         sidetone = getattr(self, '_sidetone', None)
-        
-        async def send_element(key_down: bool):
-            """Send a single keying element (same pattern as iambic mode)"""
-            nonlocal last_event_time, transmission_start
-            
-            now = time.time()
-            
-            # Update sidetone IMMEDIATELY
-            if sidetone:
-                sidetone.set_key(key_down)
-            
-            # Calculate duration of PREVIOUS state (TCI protocol semantics)
-            if transmission_start is None:
-                transmission_start = now
-                previous_duration_ms = 0
-            else:
-                previous_duration_ms = int((now - last_event_time) * 1000)
-            
-            # Cap duration to prevent overflow
-            previous_duration_ms = min(previous_duration_ms, 65535)
-            
-            # Update state
-            last_event_time = now
-            self.key_down = key_down
-            
-            # Send keying event with PREVIOUS state's duration
-            if self.on_key_event:
-                await self.on_key_event(key_down, previous_duration_ms)
-        
-        async def pre_arm_tx():
-            """Pre-arm TX before element (main.py handles de-duplication)"""
-            if self.on_tx_start:
-                await self.on_tx_start()
         
         while self.running:
             try:
@@ -185,12 +151,29 @@ class USBPaddleHandler:
                 
                 # Detect state change
                 if new_key_down != self.key_down:
-                    # Pre-arm TX on EVERY key-down (callback handles de-duplication)
-                    if new_key_down:
-                        await pre_arm_tx()
+                    now = time.time()
                     
-                    # Send element (key-down or key-up)
-                    await send_element(new_key_down)
+                    # Update sidetone IMMEDIATELY
+                    if sidetone:
+                        sidetone.set_key(new_key_down)
+                    
+                    # Calculate duration of PREVIOUS state (TCI protocol semantics)
+                    if transmission_start is None:
+                        transmission_start = now
+                        previous_duration_ms = 0
+                    else:
+                        previous_duration_ms = int((now - last_event_time) * 1000)
+                    
+                    # Cap duration to prevent overflow
+                    previous_duration_ms = min(previous_duration_ms, 65535)
+                    
+                    # Update state
+                    last_event_time = now
+                    self.key_down = new_key_down
+                    
+                    # Send keying event with PREVIOUS state's duration
+                    if self.on_key_event:
+                        await self.on_key_event(new_key_down, previous_duration_ms)
                     
                     # Reset timing after idle period
                     if not new_key_down:
@@ -202,8 +185,7 @@ class USBPaddleHandler:
                 if not new_key_down and transmission_start:
                     if (time.time() - last_event_time) > 5.0:
                         transmission_start = None
-                        tx_armed = False
-                        self.logger.debug("Straight key: Reset TX armed state after idle")
+                        self.logger.debug("Straight key: Reset after idle")
                 
                 # Sleep to achieve polling rate
                 await asyncio.sleep(self.poll_interval)

@@ -231,14 +231,23 @@ class TCIClient:
         """Stop CW macro transmission immediately"""
         await self.send_command("cw_macros_stop")
     
-    async def send_keyer(self, key_down: bool, previous_duration_ms: int):
+    async def send_keyer(self, key_down: bool, previous_duration_ms: int, force_ptt: bool = False, settle_time_ms: int = 0):
         """
         Send manual keyer command (for physical paddle/key)
         
         Args:
             key_down: Current key state (True=down, False=up)
             previous_duration_ms: Duration of PREVIOUS state in milliseconds
+            force_ptt: If True, send TRX command before KEYER (for Break-in workaround)
+            settle_time_ms: Delay in ms after TRX command (only used if force_ptt=True and key_down=True)
         """
+        # Force PTT on before KEYER command if requested
+        if force_ptt and key_down:
+            await self.send_command(f"TRX:{self.trx_number},true")
+            # Wait for TX to settle before sending KEYER
+            if settle_time_ms > 0:
+                await asyncio.sleep(settle_time_ms / 1000.0)
+        
         state = "true" if key_down else "false"
         await self.send_command(f"KEYER:{self.trx_number},{state},{previous_duration_ms}")
     

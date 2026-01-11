@@ -4,19 +4,19 @@ tci:
   trx_number: 0
   auto_reconnect: true
   reconnect_delay: 3.0
-  force_ptt: false
+  force_ptt: true
   keepalive_ping: false
 operator:
   callsign: SM0ONR
 cw:
   default_mode: CW
-  speed_wpm: 26
+  speed_wpm: 25
   keyer_mode: iambic-b
-  tx_settle_time: 0.03
+  tx_settle_time: 0.05
 sidetone:
   enabled: true
   frequency: 510
-  volume: 1.0
+  volume: 0.28440366972477066
 usb_hid:
   enabled: true
   device_path: null
@@ -26,7 +26,7 @@ usb_hid:
 vail_adapter:
   enabled: true
   keyer_mode: 8
-  speed_wpm: 26
+  speed_wpm: 25
   sidetone_note: 72
   output_mode: keyboard
   allow_dynamic_speed: true
