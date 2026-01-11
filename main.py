@@ -316,6 +316,161 @@ class TCICWController:
         except Exception as e:
             self.logger.error(f"Error sending CW macro: {e}")
     
+    async def send_macro(self, message: str):
+        """
+        Send CW macro (for GUI button clicks)
+        
+        Args:
+            message: CW message to send (with callsign already substituted)
+        """
+        await self._on_macro_send("GUI", message)
+    
+    async def update_cw_speed(self, wpm: int):
+        """
+        Update CW speed (for GUI slider)
+        
+        Args:
+            wpm: Words per minute (15-40)
+        """
+        if not self.tci_client or not self.tci_client.ready:
+            self.logger.warning("Cannot set CW speed: TCI not ready")
+            return
+        
+        self.logger.info(f"Setting CW speed to {wpm} WPM")
+        
+        try:
+            await self.tci_client.set_cw_speed(wpm)
+            
+            # Update config in memory
+            self.config['cw']['speed_wpm'] = wpm
+            
+            # Update USB paddle handler if active
+            if self.usb_paddle_handler:
+                self.usb_paddle_handler.set_wpm(wpm)
+            
+            # Update Vail adapter if enabled and dynamic speed allowed
+            vail_config = self.config.get('vail_adapter', {})
+            if vail_config.get('enabled', False):
+                if vail_config.get('allow_dynamic_speed', False):
+                    self.logger.info(f"Attempting to update Vail adapter speed to {wpm} WPM via MIDI...")
+                    try:
+                        from vail_adapter_lib.midi_config import VailAdapterConfig
+                        configurator = VailAdapterConfig()
+                        
+                        # Reconfigure with new speed (keep other settings)
+                        success = configurator.configure_adapter(
+                            keyer_mode=vail_config.get('keyer_mode', 8),
+                            speed_wpm=wpm,
+                            sidetone_note=vail_config.get('sidetone_note', 73),
+                            keyboard_mode=(vail_config.get('output_mode', 'keyboard') == 'keyboard')
+                        )
+                        
+                        if success:
+                            self.logger.info(f"✓ Vail adapter speed updated to {wpm} WPM via MIDI")
+                            # Update vail_adapter config section too
+                            self.config['vail_adapter']['speed_wpm'] = wpm
+                        else:
+                            self.logger.warning(f"✗ Vail adapter speed update failed (MIDI command unsuccessful)")
+                    except Exception as e:
+                        self.logger.error(f"✗ Could not update Vail adapter speed: {e}", exc_info=True)
+                else:
+                    self.logger.debug(f"Vail adapter dynamic speed disabled (allow_dynamic_speed=false)")
+                
+        except Exception as e:
+            self.logger.error(f"Error setting CW speed: {e}")
+    
+    async def update_sidetone(self, frequency: int, volume: float):
+        """
+        Update sidetone frequency and volume
+        
+        Args:
+            frequency: Frequency in Hz (400-800)
+            volume: Volume level (0.0-1.0)
+        """
+        # Update Python local sidetone
+        if self.sidetone:
+            self.sidetone.set_frequency(frequency)
+            self.sidetone.set_volume(volume)
+            self.logger.debug(f"Python sidetone: {frequency} Hz, {volume*100:.0f}%")
+        
+        # Update config
+        self.config['sidetone']['frequency'] = frequency
+        self.config['sidetone']['volume'] = volume
+        
+        # Update Vail adapter sidetone if enabled and dynamic updates allowed
+        vail_config = self.config.get('vail_adapter', {})
+        if vail_config.get('enabled', False) and vail_config.get('allow_dynamic_speed', False):
+            # Convert frequency to MIDI note (A4 = 440Hz = note 69)
+            import math
+            midi_note = int(round(69 + 12 * math.log2(frequency / 440.0)))
+            midi_note = max(0, min(127, midi_note))  # Clamp to MIDI range
+            
+            self.logger.info(f"Updating Vail adapter sidetone: {frequency} Hz = MIDI note {midi_note}")
+            
+            try:
+                from vail_adapter_lib.midi_config import VailAdapterConfig
+                configurator = VailAdapterConfig()
+                
+                # Reconfigure with new sidetone (keep other settings)
+                success = configurator.configure_adapter(
+                    keyer_mode=vail_config.get('keyer_mode', 8),
+                    speed_wpm=vail_config.get('speed_wpm', 25),
+                    sidetone_note=midi_note,
+                    keyboard_mode=(vail_config.get('output_mode', 'keyboard') == 'keyboard')
+                )
+                
+                if success:
+                    self.logger.info(f"✓ Vail adapter sidetone updated to {frequency} Hz (note {midi_note})")
+                    self.config['vail_adapter']['sidetone_note'] = midi_note
+                else:
+                    self.logger.warning(f"✗ Vail adapter sidetone update failed")
+            except Exception as e:
+                self.logger.error(f"✗ Could not update Vail adapter sidetone: {e}")
+    
+    async def save_config_to_file(self, config: dict):
+        """
+        Save configuration to YAML file
+        
+        Args:
+            config: Configuration dictionary to save
+        """
+        try:
+            # Update internal config
+            self.config = config.copy()
+            
+            # Write to file
+            config_path = Path("config.yaml")
+            with open(config_path, 'w') as f:
+                yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
+            
+            self.logger.info(f"Config saved to {config_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving config: {e}")
+            raise
+    
+    async def reload_config(self) -> dict:
+        """
+        Reload configuration from YAML file
+        
+        Returns:
+            Reloaded configuration dictionary
+        """
+        try:
+            config_path = Path("config.yaml")
+            with open(config_path, 'r') as f:
+                new_config = yaml.safe_load(f)
+            
+            # Update internal config
+            self.config = new_config
+            
+            self.logger.info(f"Config reloaded from {config_path}")
+            return new_config
+            
+        except Exception as e:
+            self.logger.error(f"Error reloading config: {e}")
+            raise
+    
     async def _on_paddle_event(self, key_down: bool, previous_duration_ms: int):
         """
         Callback for each paddle key state change.
@@ -527,24 +682,96 @@ class TCICWController:
 
 async def main():
     """Application entry point"""
-    # Handle Ctrl+C gracefully
-    loop = asyncio.get_event_loop()
-    controller = None
+    import argparse
     
-    def signal_handler(sig, frame):
-        """Handle interrupt signal"""
-        if controller:
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="TCI CW Controller")
+    parser.add_argument('--gui', action='store_true', help="Launch with GUI")
+    parser.add_argument('--config', default='config.yaml', help="Config file path")
+    args = parser.parse_args()
+    
+    # Run controller
+    controller = TCICWController(config_path=args.config)
+    
+    if args.gui:
+        # Launch with GUI - run asyncio in background thread
+        from gui_window import TkinterGUI
+        import threading
+        
+        # Create a new event loop for the background thread
+        loop = asyncio.new_event_loop()
+        
+        # Start controller in background thread with its own event loop
+        def run_controller():
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(controller.run())
+            except Exception as e:
+                logging.error(f"Controller thread error: {e}")
+        
+        controller_thread = threading.Thread(target=run_controller, daemon=True)
+        controller_thread.start()
+        
+        # Wait for controller to initialize (TCI connection, sidetone, etc.)
+        import time
+        max_wait = 10  # seconds
+        wait_step = 0.1
+        waited = 0
+        
+        while waited < max_wait:
+            if controller.tci_client and controller.tci_client.ready:
+                logging.info("Controller initialized and ready")
+                break
+            time.sleep(wait_step)
+            waited += wait_step
+        
+        if waited >= max_wait:
+            logging.warning("Controller initialization timeout - GUI may show incorrect status")
+        
+        # Create and run GUI in main thread (blocks until window closed)
+        gui = TkinterGUI(controller, loop)
+        
+        # Handle window close
+        def on_closing():
+            from tkinter import messagebox
+            if messagebox.askokcancel("Quit", "Quit TCI CW Controller?"):
+                # Shutdown controller in background thread
+                future = asyncio.run_coroutine_threadsafe(controller.shutdown(), loop)
+                try:
+                    future.result(timeout=2.0)
+                except:
+                    pass
+                gui.root.destroy()
+        
+        gui.root.protocol("WM_DELETE_WINDOW", on_closing)
+        gui.run()
+        
+        # GUI closed, ensure controller is shutdown
+        if controller.running:
+            try:
+                future = asyncio.run_coroutine_threadsafe(controller.shutdown(), loop)
+                future.result(timeout=2.0)
+            except:
+                pass
+            controller_thread.join(timeout=2.0)
+        
+        exit_code = 0
+    else:
+        # Run in CLI mode
+        # Handle Ctrl+C gracefully
+        loop = asyncio.get_event_loop()
+        
+        def signal_handler(sig, frame):
+            """Handle interrupt signal"""
             print("\n\nInterrupt received, shutting down...")
             asyncio.create_task(controller.shutdown())
             # Cancel all tasks
             for task in asyncio.all_tasks(loop):
                 task.cancel()
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    # Run controller
-    controller = TCICWController()
-    exit_code = await controller.run()
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        exit_code = await controller.run()
     
     sys.exit(exit_code)
 

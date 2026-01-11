@@ -78,6 +78,20 @@ class USBPaddleHandler:
             self.logger.info("USB paddle connected")
         return success
     
+    def set_wpm(self, wpm: int):
+        """
+        Set keyer speed in WPM (for iambic mode)
+        
+        Args:
+            wpm: Words per minute (15-40)
+        """
+        if self.iambic_keyer:
+            self.iambic_keyer.set_speed(wpm)
+            self.logger.info(f"Iambic keyer speed set to {wpm} WPM")
+        else:
+            self.logger.debug(f"set_wpm called but no iambic keyer active (mode: {self.keyer_mode})")
+    
+    
     def disconnect(self):
         """Disconnect from USB HID device"""
         self.hid_reader.close()

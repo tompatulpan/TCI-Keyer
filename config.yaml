@@ -1,103 +1,45 @@
-# TCI CW Controller Configuration
-
-# Radio connection settings
 tci:
-  host: "localhost"        # TCI server IP address or hostname
-  port: 40001              # TCI server port (try 40001, 50001, or check ExpertSDR3 settings)
-  trx_number: 0            # Transceiver number (usually 0)
-  auto_reconnect: true     # Reconnect automatically on disconnect
-  reconnect_delay: 3.0     # Seconds to wait before reconnecting
-  force_ptt: false          # Force PTT before CW macros (workaround for ExpertSDR3 focus issue)
-  keepalive_ping: false    # Send periodic pings to keep ExpertSDR3 event loop active (Wayland workaround - DOESN'T WORK)
-
-# Operator settings
+  host: localhost
+  port: 40001
+  trx_number: 0
+  auto_reconnect: true
+  reconnect_delay: 3.0
+  force_ptt: false
+  keepalive_ping: false
 operator:
-  callsign: "SM0ONR"         # Your callsign (used in {callsign} substitution)
-
-# CW settings
+  callsign: SM0ONR
 cw:
-  default_mode: "CW"       # Default mode: CW, CWL, or CWU
-  speed_wpm: 25            # CW speed for USB paddle keying (words per minute)
-                           # NOTE: F-key macros use ExpertSDR3's internal CW speed setting,
-                           # not this value. Set macro speed in ExpertSDR3 → Settings → CW.
-                           # This speed_wpm only affects manual paddle keying timing.
-  keyer_mode: "iambic-b"   # Keyer mode: straight, iambic-a, iambic-b
-                           # straight: Either paddle = key down (no iambic logic)
-                           # iambic_a/b: Full iambic keyer with squeeze and memory
-                           # Both modes work identically - no Break-in required!
-  tx_settle_time: 0.030    # Seconds to wait after TRX enable before first KEYER command
-                           # This allows ExpertSDR3 to fully switch to TX mode.
-                           # Too low = first dit/dah gets clipped or lost
-                           # Too high = noticeable delay when starting to key
-                           # Typical values: 0.010-0.100 (10-100ms)
-
-# Sidetone settings (for USB paddle manual keying)
+  default_mode: CW
+  speed_wpm: 26
+  keyer_mode: iambic-b
+  tx_settle_time: 0.03
 sidetone:
-  enabled: true           # Enable/disable local Python sidetone (set to false to use only ExpertSDR3 sidetone)
-  frequency: 600           # Sidetone frequency in Hz (typical: 400-800)
-  volume: 0.5              # Volume level (0.0-1.0)
-  # Note: F-key macros always use radio's sidetone (from ExpertSDR3)
-
-# USB HID settings (for physical morse key via XIAO SAMD21)
-# Supports two firmware options:
-#   1. Custom firmware (default) - Simple HID, Python handles keyer logic
-#   2. Vail adapter firmware (experimental) - Hardware keyer, 9 modes, MIDI control
-#      Enable via vail_adapter.enabled below
+  enabled: true
+  frequency: 510
+  volume: 1.0
 usb_hid:
-  enabled: true            # Enable USB paddle input
-  device_path: null        # Auto-detect if null, or specify: /dev/hidraw0
-  vendor_id: "2886"        # XIAO SAMD21 VID
-  product_id: "802f"       # XIAO SAMD21 PID
-  debug: false             # Enable HID debug output
-
-# Vail Adapter firmware configuration (EXPERIMENTAL)
-# Only enable if you've flashed Vail adapter v4.4 firmware to your XIAO SAMD21
-# Download: https://github.com/Vail-CW/vail-adapter/releases
-# Use xiao_basic_pcb_v2.uf2 (for PCB v2) or xiao_non_pcb.uf2 (direct wiring)
-# See VAIL_ADAPTER_INTEGRATION.md for complete setup instructions
+  enabled: true
+  device_path: null
+  vendor_id: '2886'
+  product_id: 802f
+  debug: false
 vail_adapter:
-  enabled: false            # Enable Vail adapter MIDI configuration at startup
-  
-  # Keyer mode (sent via MIDI Program Change)
-  # 0=Passthrough, 1=Straight, 2=Bug, 3=ElBug, 4=SingleDot,
-  # 5=Ultimatic, 6=Plain, 7=IambicA, 8=IambicB, 9=Keyahead
-  keyer_mode: 8            # 8 = Iambic B (most common)
-  
-  # Keyer speed (sent via MIDI CC1 at startup)
-  # This configures the firmware's internal keyer timing
-  # Overrides cw.speed_wpm when Vail adapter is enabled
-  speed_wpm: 35
-  
-  # Sidetone frequency as MIDI note number (sent via MIDI CC2)
-  # Common values: 60=C4 (261Hz), 68=G#4 (415Hz), 69=A4 (440Hz), 
-  #                72=C5 (523Hz), 76=E5 (659Hz)
-  # For 600 Hz use note 73
-  sidetone_note: 73        # ~600 Hz sidetone
-  
-  # Output mode (sent via MIDI CC0)
-  # keyboard: Use USB HID keyboard (Left/Right Ctrl keys) - RECOMMENDED
-  # midi: Use MIDI notes (C# and D for dit/dah) - for MIDI-aware apps
-  output_mode: "keyboard"  # Keep as keyboard for TCI controller
-  
-  # Dynamic speed control (optional)
-  # If true, speed changes via F11/F12 will send MIDI commands to adapter
-  allow_dynamic_speed: false
-
-# Function key CW macros (F1-F12)
-# Use {callsign} for substitution
-# Special characters: > = faster, < = slower, |SK| = prosign
-# NOTE: Macro speed is controlled by ExpertSDR3's CW speed setting, NOT config.yaml speed_wpm.
-# To change F-key macro speed: ExpertSDR3 → Break.in → Macros speed
+  enabled: true
+  keyer_mode: 8
+  speed_wpm: 26
+  sidetone_note: 72
+  output_mode: keyboard
+  allow_dynamic_speed: true
 function_keys:
-  F1: "CQ CQ CQ DE {callsign} {callsign} K"
-  F2: "{callsign}"
-  F3: "{callsign} 599"
-  F4: "TU 73 DE {callsign}"
-  F5: "QRZ? DE {callsign} K"
-  F6: "PSE QRS"
-  F7: "QRL?"
-  F8: "TEST DE {callsign}"
-  F9: "TEST"
-  F10: "" # Not assigned
-  F11: "" # Not assigned
-  F12: "" # Not assigned
+  F1: CQ CQ CQ DE {callsign} {callsign} K
+  F2: '{callsign}'
+  F3: '{callsign} 599'
+  F4: TU 73 DE {callsign}
+  F5: QRZ? DE {callsign} K
+  F6: PSE QRS
+  F7: QRL?
+  F8: TEST DE {callsign}
+  F9: TEST
+  F10: ''
+  F11: ''
+  F12: ''
