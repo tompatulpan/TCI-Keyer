@@ -205,3 +205,6 @@ web_platform_tcp/dist/
 *.js.map
 *.min.js
 *.bundle.js
+
+# Archive of old/test files
+archive/

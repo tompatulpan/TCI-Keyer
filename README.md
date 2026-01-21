@@ -117,11 +117,26 @@ See this - https://vailadapter.com/
 pip install -r requirements.txt
 ```
 
-Dependencies:
+**Dependencies:**
 - `websockets` - TCI WebSocket client
 - `pynput` - Keyboard input for F-keys
 - `pyaudio` - Local sidetone audio
 - `PyYAML` - Configuration file parsing
+- `mido`, `python-rtmidi` - MIDI control for Vail firmware (optional)
+
+**Optional: Vail Adapter Library** (for Vail firmware MIDI configuration)
+
+If using Vail adapter firmware (Option 2), uncomment in `requirements.txt` and install:
+
+```bash
+# Uncomment this line in requirements.txt:
+# git+https://github.com/tompatulpan/vail-adapter-lib.git
+
+# Then install:
+pip install -r requirements.txt
+```
+
+**Note:** The library is only needed for initial MIDI configuration of Vail firmware. Once configured, settings persist in EEPROM.
 
 ### 2. Flash XIAO Firmware (USB Paddle Only)
 

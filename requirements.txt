@@ -16,8 +16,9 @@ PyYAML>=6.0
 mido>=1.3.0
 python-rtmidi>=1.5.0
 
-# Vail adapter library (local development - editable install)
--e ../vail-adapter-lib
+# Vail adapter library (optional - for Vail firmware MIDI configuration)
+# Uncomment if using Vail adapter firmware:
+# git+https://github.com/tompatulpan/vail-adapter-lib.git
 
 # Note: xiao_hid_reader.py uses only stdlib (os, glob, struct, subprocess)
 # No additional dependencies needed for USB HID reading
