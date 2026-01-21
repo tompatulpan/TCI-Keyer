@@ -69,6 +69,9 @@ class TCIClient:
             while (asyncio.get_event_loop().time() - start_time) < ready_timeout:
                 try:
                     message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
+                    # Handle both bytes and string from websocket
+                    if isinstance(message, bytes):
+                        message = message.decode('utf-8')
                     self.logger.debug(f"RX: {message.strip()}")
                     
                     if message.strip().upper() == "READY;":
@@ -143,6 +146,9 @@ class TCIClient:
         while self.running and self.websocket:
             try:
                 message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
+                # Handle both bytes and string from websocket
+                if isinstance(message, bytes):
+                    message = message.decode('utf-8')
                 self.logger.debug(f"RX: {message.strip()}")
                 
                 if self.on_message:
@@ -180,6 +186,9 @@ class TCIClient:
         Args:
             message: TCI message like 'MODULATION:0,CW;'
         """
+        # Ensure message is string
+        if isinstance(message, bytes):
+            message = message.decode('utf-8')
         try:
             # Format: MODULATION:trx,mode;
             parts = message.rstrip(';').split(':')
@@ -288,6 +297,9 @@ class TCIClient:
         Args:
             message: TCI message string (e.g., "drive:0,50;")
         """
+        # Ensure message is string
+        if isinstance(message, bytes):
+            message = message.decode('utf-8')
         if message.lower().startswith(f"drive:{self.trx_number},"):
             try:
                 # Parse "drive:0,50;" -> 50

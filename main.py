@@ -176,6 +176,7 @@ class TCICWController:
         # Setup callbacks
         self.usb_paddle_handler.on_key_event = self._on_paddle_event
         self.usb_paddle_handler.on_tx_start = self._on_paddle_tx_start
+        self.usb_paddle_handler.on_disconnect = self._on_paddle_disconnect
         
         # Pass sidetone to paddle handler for immediate audio feedback (if enabled)
         if self.sidetone:
@@ -188,48 +189,39 @@ class TCICWController:
     
     def _configure_vail_adapter(self, vail_config: dict):
         """
-        Configure Vail adapter firmware via MIDI
+        Configure Vail adapter firmware via MIDI with retry logic
         
         Args:
             vail_config: Vail adapter configuration dictionary
         """
         self.logger.info("Configuring Vail adapter firmware via MIDI...")
         
-        try:
-            from vail_adapter_lib.midi_config import VailAdapterConfig
-        except ImportError as e:
-            self.logger.error(f"vail-adapter-lib not installed: {e}")
-            self.logger.error("Install with: pip install -e ../vail-adapter-lib")
-            self.logger.warning("Adapter will use stored EEPROM settings - speed may be incorrect!")
-            return
+        # Get configuration values - use cw.keyer_mode as master setting
+        keyer_mode_str = self.config['cw'].get('keyer_mode', 'iambic-b')
         
-        try:
-            # Get configuration values - use cw.keyer_mode as master setting
-            keyer_mode_str = self.config['cw'].get('keyer_mode', 'iambic-b')
+        # Map string keyer mode to Vail firmware mode number
+        keyer_mode_map = {
+            'straight': 1, 'iambic-a': 7, 'iambic-b': 8,
+            'iambic_a': 7, 'iambic_b': 8  # Alternative format
+        }
+        keyer_mode = keyer_mode_map.get(keyer_mode_str.lower(), 8)  # Default to iambic-b
+        
+        speed_wpm = self.config['cw'].get('speed_wpm', 25)
+        sidetone_note = vail_config.get('sidetone_note', 73)
+        output_mode = vail_config.get('output_mode', 'keyboard')
+        keyboard_mode = (output_mode == 'keyboard')
+        
+        # Retry logic for USB MIDI enumeration delay
+        import time
+        max_retries = 3
+        retry_delay = 0.5
+        
+        for attempt in range(max_retries):
+            if attempt > 0:
+                self.logger.debug(f"Retrying MIDI configuration (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(retry_delay)
             
-            # Map string keyer mode to Vail firmware mode number
-            keyer_mode_map = {
-                'straight': 1,
-                'iambic-a': 7,
-                'iambic-b': 8,
-                'iambic_a': 7,  # Alternative format
-                'iambic_b': 8,  # Alternative format
-            }
-            keyer_mode = keyer_mode_map.get(keyer_mode_str.lower(), 8)  # Default to iambic-b
-            
-            speed_wpm = self.config['cw'].get('speed_wpm', 25)
-            sidetone_note = vail_config.get('sidetone_note', 73)
-            output_mode = vail_config.get('output_mode', 'keyboard')
-            keyboard_mode = (output_mode == 'keyboard')
-            
-            # Configure adapter
-            configurator = VailAdapterConfig()
-            success = configurator.configure_adapter(
-                keyer_mode=keyer_mode,
-                speed_wpm=speed_wpm,
-                sidetone_note=sidetone_note,
-                keyboard_mode=keyboard_mode
-            )
+            success = self._configure_vail_adapter_safe(keyer_mode, speed_wpm, sidetone_note, keyboard_mode)
             
             if success:
                 keyer_names = {
@@ -238,13 +230,11 @@ class TCICWController:
                     7: "IambicA", 8: "IambicB", 9: "Keyahead"
                 }
                 self.logger.info(f"Vail adapter configured: {keyer_names.get(keyer_mode, 'Unknown')} at {speed_wpm} WPM")
-            else:
-                self.logger.warning("Failed to configure Vail adapter - check MIDI connection")
-                self.logger.warning("Adapter may be using stored EEPROM settings")
-                
-        except Exception as e:
-            self.logger.error(f"Error configuring Vail adapter: {e}", exc_info=True)
-            self.logger.warning("Adapter will use stored EEPROM settings")
+                return
+        
+        # All retries failed
+        self.logger.warning("Failed to configure Vail adapter - check MIDI connection")
+        self.logger.warning("Adapter may be using stored EEPROM settings")
     
     def _initialize_sidetone(self) -> bool:
         """
@@ -273,6 +263,85 @@ class TCICWController:
             self.logger.warning(f"Failed to initialize sidetone: {e}")
             self.sidetone = None
             return False
+    
+    # ===== Helper Methods =====
+    
+    def _get_current_keyer_mode(self) -> int:
+        """
+        Get current keyer mode as MIDI mode number from master cw config
+        
+        Returns:
+            MIDI keyer mode number (1-9)
+        """
+        keyer_mode_str = self.config['cw'].get('keyer_mode', 'iambic-b')
+        
+        # Map string keyer mode to Vail firmware mode number
+        keyer_mode_map = {
+            'straight': 1, 'iambic-a': 7, 'iambic-b': 8,
+            'iambic_a': 7, 'iambic_b': 8  # Alternative format
+        }
+        return keyer_mode_map.get(keyer_mode_str.lower(), 8)  # Default to iambic-b
+    
+    def _configure_vail_adapter_safe(self, keyer_mode: int, speed_wpm: int, 
+                                     sidetone_note: int, keyboard_mode: bool) -> bool:
+        """
+        Safely configure Vail adapter with error handling
+        
+        Args:
+            keyer_mode: Keyer mode (0-9)
+            speed_wpm: Speed in WPM
+            sidetone_note: MIDI note for sidetone
+            keyboard_mode: True for keyboard output, False for MIDI
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from vail_adapter_lib.midi_config import VailAdapterConfig
+            configurator = VailAdapterConfig()
+            return configurator.configure_adapter(
+                keyer_mode=keyer_mode,
+                speed_wpm=speed_wpm,
+                sidetone_note=sidetone_note,
+                keyboard_mode=keyboard_mode
+            )
+        except ModuleNotFoundError:
+            self.logger.debug("Vail adapter library not installed (pip install -e ../vail-adapter-lib)")
+            return False
+        except Exception as e:
+            self.logger.error(f"Could not configure Vail adapter: {e}")
+            return False
+    
+    async def _enable_paddle_ptt(self) -> bool:
+        """
+        Enable PTT for paddle keying (switches to CW mode if needed)
+        
+        Returns:
+            True if PTT enabled successfully
+        """
+        if not self.paddle_ptt_active:
+            # Switch to CW mode if needed
+            if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
+                await self.tci_client.set_mode_cw()
+            
+            # Enable PTT
+            await self.tci_client.set_ptt(True)
+            self.paddle_ptt_active = True
+            self.logger.debug("TX enabled for paddle keying")
+            return True
+        return False  # Already active
+    
+    def _cleanup_usb_paddle(self):
+        """Cleanup USB paddle handler (stop, disconnect, clear)"""
+        if self.usb_paddle_handler:
+            try:
+                self.usb_paddle_handler.stop()
+                self.usb_paddle_handler.disconnect()
+            except Exception:
+                pass
+            self.usb_paddle_handler = None
+    
+    # ===== Callback Handlers =====
     
     def _on_tci_ready(self):
         """Callback when TCI server is ready"""
@@ -356,16 +425,16 @@ class TCICWController:
         Args:
             wpm: Words per minute (15-40)
         """
-        if not self.tci_client or not self.tci_client.ready:
-            self.logger.warning("Cannot set CW speed: TCI not ready")
-            return
-        
         self.logger.info(f"Setting CW speed to {wpm} WPM")
         
         try:
-            await self.tci_client.set_cw_speed(wpm)
+            # Update TCI if connected
+            if self.tci_client and self.tci_client.ready:
+                await self.tci_client.set_cw_speed(wpm)
+            else:
+                self.logger.debug("TCI not ready - updating local config only")
             
-            # Update config in memory
+            # Update config in memory (always)
             self.config['cw']['speed_wpm'] = wpm
             
             # Update USB paddle handler if active
@@ -374,31 +443,21 @@ class TCICWController:
             
             # Update Vail adapter if enabled and dynamic speed allowed
             vail_config = self.config.get('vail_adapter', {})
-            if vail_config.get('enabled', False):
-                if vail_config.get('allow_dynamic_speed', False):
-                    self.logger.info(f"Attempting to update Vail adapter speed to {wpm} WPM via MIDI...")
-                    try:
-                        from vail_adapter_lib.midi_config import VailAdapterConfig
-                        configurator = VailAdapterConfig()
-                        
-                        # Reconfigure with new speed (keep other settings)
-                        success = configurator.configure_adapter(
-                            keyer_mode=vail_config.get('keyer_mode', 8),
-                            speed_wpm=wpm,
-                            sidetone_note=vail_config.get('sidetone_note', 73),
-                            keyboard_mode=(vail_config.get('output_mode', 'keyboard') == 'keyboard')
-                        )
-                        
-                        if success:
-                            self.logger.info(f"✓ Vail adapter speed updated to {wpm} WPM via MIDI")
-                            # Update vail_adapter config section too
-                            self.config['vail_adapter']['speed_wpm'] = wpm
-                        else:
-                            self.logger.warning(f"✗ Vail adapter speed update failed (MIDI command unsuccessful)")
-                    except Exception as e:
-                        self.logger.error(f"✗ Could not update Vail adapter speed: {e}", exc_info=True)
+            if vail_config.get('enabled', False) and vail_config.get('allow_dynamic_speed', False):
+                self.logger.debug(f"Attempting to update Vail adapter speed to {wpm} WPM via MIDI...")
+                
+                # Get current keyer mode from master cw config (not cached vail_adapter value)
+                keyer_mode = self._get_current_keyer_mode()
+                sidetone_note = vail_config.get('sidetone_note', 73)
+                keyboard_mode = (vail_config.get('output_mode', 'keyboard') == 'keyboard')
+                
+                success = self._configure_vail_adapter_safe(keyer_mode, wpm, sidetone_note, keyboard_mode)
+                
+                if success:
+                    self.logger.info(f"✓ Vail adapter speed updated to {wpm} WPM via MIDI")
+                    self.config['vail_adapter']['speed_wpm'] = wpm
                 else:
-                    self.logger.debug(f"Vail adapter dynamic speed disabled (allow_dynamic_speed=false)")
+                    self.logger.warning(f"✗ Vail adapter speed update failed")
                 
         except Exception as e:
             self.logger.error(f"Error setting CW speed: {e}")
@@ -411,11 +470,15 @@ class TCICWController:
             frequency: Frequency in Hz (400-800)
             volume: Volume level (0.0-1.0)
         """
+        self.logger.info(f"Setting sidetone to {frequency} Hz, {volume*100:.0f}%")
+        
         # Update Python local sidetone
         if self.sidetone:
             self.sidetone.set_frequency(frequency)
             self.sidetone.set_volume(volume)
-            self.logger.debug(f"Python sidetone: {frequency} Hz, {volume*100:.0f}%")
+            self.logger.info(f"✓ Python sidetone updated: {frequency} Hz, {volume*100:.0f}%")
+        else:
+            self.logger.warning("Sidetone not initialized - skipping local sidetone update")
         
         # Update config
         self.config['sidetone']['frequency'] = frequency
@@ -431,25 +494,19 @@ class TCICWController:
             
             self.logger.info(f"Updating Vail adapter sidetone: {frequency} Hz = MIDI note {midi_note}")
             
-            try:
-                from vail_adapter_lib.midi_config import VailAdapterConfig
-                configurator = VailAdapterConfig()
-                
-                # Reconfigure with new sidetone (keep other settings)
-                success = configurator.configure_adapter(
-                    keyer_mode=vail_config.get('keyer_mode', 8),
-                    speed_wpm=vail_config.get('speed_wpm', 25),
-                    sidetone_note=midi_note,
-                    keyboard_mode=(vail_config.get('output_mode', 'keyboard') == 'keyboard')
-                )
-                
-                if success:
-                    self.logger.info(f"✓ Vail adapter sidetone updated to {frequency} Hz (note {midi_note})")
-                    self.config['vail_adapter']['sidetone_note'] = midi_note
-                else:
-                    self.logger.warning(f"✗ Vail adapter sidetone update failed")
-            except Exception as e:
-                self.logger.error(f"✗ Could not update Vail adapter sidetone: {e}")
+            # Use helper method for consistency
+            # Get current keyer mode from master cw config (not cached vail_adapter value)
+            keyer_mode = self._get_current_keyer_mode()
+            speed_wpm = self.config['cw'].get('speed_wpm', 25)
+            keyboard_mode = (vail_config.get('output_mode', 'keyboard') == 'keyboard')
+            
+            success = self._configure_vail_adapter_safe(keyer_mode, speed_wpm, midi_note, keyboard_mode)
+            
+            if success:
+                self.logger.info(f"✓ Vail adapter sidetone updated to {frequency} Hz (note {midi_note})")
+                self.config['vail_adapter']['sidetone_note'] = midi_note
+            else:
+                self.logger.warning(f"✗ Vail adapter sidetone update failed")
     
     async def save_config_to_file(self, config: dict):
         """
@@ -514,13 +571,7 @@ class TCICWController:
             if hasattr(self, 'use_vail_firmware') and self.use_vail_firmware:
                 # On first key-down, arm TX and start buffer processing
                 if key_down and not self.paddle_ptt_active:
-                    # Switch to CW mode if needed
-                    if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
-                        await self.tci_client.set_mode_cw()
-                    
-                    # Enable TX immediately
-                    await self.tci_client.set_ptt(True)
-                    self.paddle_ptt_active = True
+                    await self._enable_paddle_ptt()
                     self.vail_tx_armed_time = asyncio.get_event_loop().time()
                     self.logger.debug("Vail: TX armed, buffering events for 50ms settle")
                 
@@ -551,20 +602,15 @@ class TCICWController:
                 settle_time_ms = 0
                 
                 if key_down and not self.paddle_ptt_active:
-                    # Switch to CW mode if needed
-                    if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
-                        await self.tci_client.set_mode_cw()
-                    
-                    # Python iambic: use force_ptt in send_keyer for first element
+                    # Enable TX (switches to CW mode if needed)
                     force_ptt = self.config['tci'].get('force_ptt', False)
                     if not force_ptt:
-                        await self.tci_client.set_ptt(True)
+                        await self._enable_paddle_ptt()
                     else:
                         # Settle time will be applied in send_keyer
+                        await self._enable_paddle_ptt()
                         settle_time_ms = int(self.config['cw'].get('tx_settle_time', 0.050) * 1000)
-                    self.logger.debug("TX enabled for paddle keying")
-                    
-                    self.paddle_ptt_active = True
+
                 
                 # Cancel any pending PTT release when new keying starts
                 if self.paddle_ptt_release_task and key_down:
@@ -631,23 +677,128 @@ class TCICWController:
         if not self.paddle_ptt_active:
             self.logger.debug("Arming TX for paddle keying")
             
-            # Switch to CW mode if currently in a different mode (e.g., after band change)
-            if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
-                self.logger.debug(f"Mode is {self.tci_client.current_mode}, switching to CW")
-                await self.tci_client.set_mode_cw()
-            
-            # Enable TX
-            await self.tci_client.set_ptt(True)
-            self.paddle_ptt_active = True
+            # Enable TX (switches to CW mode if needed)
+            await self._enable_paddle_ptt()
             
             # Wait for ExpertSDR3 to complete TX switch before first KEYER
             # Without this delay, the first dit/dah may be clipped or lost
             tx_settle_time = self.config['cw'].get('tx_settle_time', 0.050)
             await asyncio.sleep(tx_settle_time)
+    
+    async def _on_paddle_disconnect(self):
+        """
+        Called when USB paddle is disconnected.
+        
+        Ensures TX is released and notifies user.
+        """
+        self.logger.warning("USB paddle disconnected - manual keying disabled")
+        
+        # Release TX if paddle was active
+        if self.paddle_ptt_active and self.tci_client and self.tci_client.ready:
+            self.logger.debug("Releasing TX due to paddle disconnect")
+            await self.tci_client.set_ptt(False)
+            self.paddle_ptt_active = False
+        
+        # Stop sidetone if active
+        if self.sidetone:
+            self.sidetone.set_key(False)
+        
+        # Clean up handler (stop and disconnect)
+        self._cleanup_usb_paddle()
+        
+        # Start auto-reconnection monitoring if enabled
+        if self.config.get('usb_hid', {}).get('auto_reconnect', True):
+            self.logger.info("Starting USB paddle auto-reconnection monitoring...")
+            asyncio.create_task(self._monitor_usb_reconnection())
+    
+    async def _monitor_usb_reconnection(self):
+        """
+        Monitor for USB paddle reconnection after disconnect.
+        
+        Polls every 2 seconds for up to 5 minutes.
+        """
+        max_attempts = 150  # 5 minutes (150 * 2s)
+        attempt = 0
+        
+        while attempt < max_attempts and self.running and self.usb_paddle_handler is None:
+            await asyncio.sleep(2.0)
+            attempt += 1
             
-            self.logger.debug(f"TX pre-armed (mode={self.tci_client.current_mode}, settle={tx_settle_time*1000:.0f}ms)")
+            # Try to reconnect
+            success = await self.reconnect_usb_paddle(silent=True)
+            if success:
+                self.logger.info("✓ USB paddle auto-reconnected successfully!")
+                return
+        
+        if attempt >= max_attempts:
+            self.logger.info("USB paddle auto-reconnection monitoring stopped (timeout)")
+    
+    async def reconnect_usb_paddle(self, silent: bool = False) -> bool:
+        """
+        Attempt to reconnect USB paddle.
+        
+        Args:
+            silent: If True, suppress log messages for failed attempts
+            
+        Returns:
+            bool: True if reconnected successfully, False otherwise
+        """
+        # If handler exists, check if it's still actually connected
+        if self.usb_paddle_handler is not None:
+            # Check if device is still responsive AND poll loop is still running
+            poll_running = getattr(self.usb_paddle_handler, 'running', False)
+            
+            if hasattr(self.usb_paddle_handler.hid_reader, 'is_connected'):
+                is_connected = self.usb_paddle_handler.hid_reader.is_connected()
+                
+                # If both connected AND polling, device is truly active
+                if is_connected and poll_running:
+                    if not silent:
+                        self.logger.warning("USB paddle already connected and active")
+                    return True
+                else:
+                    # Device disconnected OR poll loop stopped - clean it up
+                    if not silent:
+                        status = "disconnected" if not is_connected else "poll loop stopped"
+                        self.logger.info(f"Cleaning up stale USB paddle connection ({status})...")
+                    self._cleanup_usb_paddle()
+            else:
+                # No validation method - just check if poll loop is running
+                if poll_running:
+                    if not silent:
+                        self.logger.warning("USB paddle already connected (no device validation)")
+                    return True
+                else:
+                    if not silent:
+                        self.logger.info("Poll loop not running - cleaning up...")
+                    self._cleanup_usb_paddle()
+        
+        if not silent:
+            self.logger.info("Attempting to reconnect USB paddle...")
+        
+        # Try to initialize paddle handler (this creates new handler and connects)
+        success = await asyncio.to_thread(self._initialize_usb_paddle)
+        
+        if success and self.usb_paddle_handler:
+            if not silent:
+                self.logger.info("✓ USB paddle reconnected successfully")
+            
+            # Reconfigure Vail adapter firmware if enabled
+            # (device reset on reconnection loses configuration)
+            vail_config = self.config.get('vail_adapter', {})
+            if vail_config.get('enabled', False):
+                if not silent:
+                    self.logger.info("Reconfiguring Vail adapter after reconnection...")
+                # Run MIDI config in thread to avoid blocking
+                await asyncio.to_thread(self._configure_vail_adapter, vail_config)
+            
+            # Start polling task
+            asyncio.create_task(self.usb_paddle_handler.poll_loop())
+            return True
         else:
-            self.logger.debug("TX already armed, skipping")
+            if not silent:
+                self.logger.debug("USB paddle not found (still disconnected)")
+            return False
     
     async def _pre_arm_vail_tx(self):
         """Pre-arm TX for Vail firmware at startup to prevent first element clipping"""
@@ -791,9 +942,8 @@ class TCICWController:
         if self.keyboard_handler:
             self.keyboard_handler.stop()
         
-        # Stop USB paddle
-        if self.usb_paddle_handler:
-            self.usb_paddle_handler.stop()
+        # Stop USB paddle (stop, disconnect, clear)
+        self._cleanup_usb_paddle()
         
         # Close sidetone
         if self.sidetone:

@@ -210,6 +210,8 @@ class TkinterGUI:
                   command=self._save_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Reload Config", 
                   command=self._reload_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Reconnect USB Paddle", 
+                  command=self._reconnect_usb_paddle).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Quit", 
                   command=self._quit).pack(side=tk.RIGHT, padx=5)
         
@@ -245,6 +247,30 @@ class TkinterGUI:
         new_callsign = self.callsign_var.get().upper()
         self.config['operator']['callsign'] = new_callsign
         logger.debug(f"[GUI] Callsign changed to: {new_callsign}")
+    
+    def _reconnect_usb_paddle(self):
+        """Reconnect USB paddle (manual trigger)"""
+        logger.info("[GUI] USB paddle reconnection requested by user")
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self.controller.reconnect_usb_paddle(),
+                self.loop
+            )
+            # Show result after short delay
+            def check_result():
+                try:
+                    result = future.result(timeout=0.1)
+                    if result:
+                        messagebox.showinfo("USB Paddle", "USB paddle reconnected successfully!")
+                    else:
+                        messagebox.showwarning("USB Paddle", "USB paddle not found. Make sure device is connected.")
+                except Exception as e:
+                    messagebox.showerror("USB Paddle", f"Reconnection failed: {e}")
+            
+            self.root.after(1500, check_result)  # Give it time to connect
+        except Exception as e:
+            logger.error(f"[GUI] Error requesting USB paddle reconnection: {e}")
+            messagebox.showerror("USB Paddle", f"Reconnection failed: {e}")
     
     def _on_keyer_mode_change(self, event=None):
         """Keyer mode combo changed - saves to config, requires restart"""
@@ -295,13 +321,16 @@ class TkinterGUI:
         """CW speed slider changed - with throttling"""
         wpm = int(float(value))
         self.speed_label.config(text=f"{wpm} WPM")
+        logger.debug(f"[GUI] Speed slider moved to {wpm} WPM")
         
         # Cancel pending update
         if self._speed_update_pending:
             self.root.after_cancel(self._speed_update_pending)
+            logger.debug(f"[GUI] Cancelled pending speed update")
         
         # Schedule update after 300ms of no changes (debounce)
         self._speed_update_pending = self.root.after(300, lambda: self._apply_speed_change(wpm))
+        logger.debug(f"[GUI] Scheduled speed update in 300ms")
     
     def _apply_speed_change(self, wpm):
         """Actually apply speed change (called after debounce delay)"""
@@ -312,6 +341,8 @@ class TkinterGUI:
                 self.controller.update_cw_speed(wpm),
                 self.loop
             )
+            # Check for exceptions after 1 second
+            self.root.after(1000, lambda: self._check_future_result(future, "speed update"))
         except Exception as e:
             logger.error(f"[GUI] Error queueing speed update: {e}")
         
@@ -321,13 +352,16 @@ class TkinterGUI:
         """Sidetone frequency slider changed - with throttling"""
         freq = int(float(value))
         self.freq_label.config(text=f"{freq} Hz")
+        logger.debug(f"[GUI] Frequency slider moved to {freq} Hz")
         
         # Cancel pending update
         if self._sidetone_update_pending:
             self.root.after_cancel(self._sidetone_update_pending)
+            logger.debug(f"[GUI] Cancelled pending sidetone update")
         
         # Schedule update after 300ms of no changes (debounce)
         self._sidetone_update_pending = self.root.after(300, lambda: self._apply_sidetone_change())
+        logger.debug(f"[GUI] Scheduled sidetone update in 300ms")
     
     def _on_volume_change(self, value):
         """Sidetone volume slider changed - with throttling"""
@@ -353,10 +387,24 @@ class TkinterGUI:
                 self.controller.update_sidetone(freq, vol),
                 self.loop
             )
+            # Check for exceptions after 1 second
+            self.root.after(1000, lambda: self._check_future_result(future, "sidetone update"))
         except Exception as e:
             logger.error(f"[GUI] Error updating sidetone: {e}")
         
         self._sidetone_update_pending = None
+    
+    def _check_future_result(self, future, operation_name):
+        """Check if async operation completed successfully"""
+        try:
+            if future.done():
+                result = future.result()  # This will raise exception if coroutine failed
+                logger.debug(f"[GUI] {operation_name} completed successfully")
+            else:
+                logger.warning(f"[GUI] {operation_name} still pending after 1 second")
+        except Exception as e:
+            logger.error(f"[GUI] {operation_name} failed: {e}", exc_info=True)
+            messagebox.showerror("Error", f"Failed to apply {operation_name}:\\n{str(e)}")
             
     def _save_config(self):
         """Save current config to file"""
@@ -397,14 +445,17 @@ class TkinterGUI:
         if not result:
             return
             
-        # Reload via controller
-        future = asyncio.run_coroutine_threadsafe(
-            self.controller.reload_config(),
-            self.loop
-        )
-        
         try:
+            # Reload via controller
+            future = asyncio.run_coroutine_threadsafe(
+                self.controller.reload_config(),
+                self.loop
+            )
+            
             new_config = future.result(timeout=2.0)
+            if new_config is None:
+                raise ValueError("Controller returned None (may be shutting down)")
+            
             self.config = new_config.copy()
             
             # Update UI widgets

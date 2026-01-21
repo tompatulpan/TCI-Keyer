@@ -141,6 +141,9 @@ class USBPaddleHandler:
         # Get sidetone reference (set by main.py)
         sidetone = getattr(self, '_sidetone', None)
         
+        # Disconnection callback
+        on_disconnect = getattr(self, 'on_disconnect', None)
+        
         while self.running:
             try:
                 # Read paddle states (dit, dah)
@@ -190,6 +193,13 @@ class USBPaddleHandler:
                 # Sleep to achieve polling rate
                 await asyncio.sleep(self.poll_interval)
                 
+            except OSError as e:
+                # Device disconnected
+                self.logger.warning(f"USB paddle disconnected: {e}")
+                self.running = False
+                if on_disconnect:
+                    await on_disconnect()
+                break
             except Exception as e:
                 self.logger.error(f"Error in straight key poll loop: {e}")
                 await asyncio.sleep(0.1)
@@ -203,6 +213,9 @@ class USBPaddleHandler:
         
         # Get sidetone reference from callback context (set by main.py)
         sidetone = getattr(self, '_sidetone', None)
+        
+        # Disconnection callback
+        on_disconnect = getattr(self, 'on_disconnect', None)
         
         def paddle_reader():
             """Read current paddle states - SYNCHRONOUS for precise timing"""
@@ -264,6 +277,13 @@ class USBPaddleHandler:
                     # Small sleep when idle to avoid spinning
                     await asyncio.sleep(0.001)
                     
+            except OSError as e:
+                # Device disconnected
+                self.logger.warning(f"USB paddle disconnected: {e}")
+                self.running = False
+                if on_disconnect:
+                    await on_disconnect()
+                break
             except Exception as e:
                 self.logger.error(f"Error in iambic keyer loop: {e}")
                 await asyncio.sleep(0.1)

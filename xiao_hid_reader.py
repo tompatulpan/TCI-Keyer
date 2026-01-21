@@ -92,6 +92,23 @@ class XiaoHIDReader:
                 continue
         return None
     
+    def _print_device_not_found(self):
+        """Print helpful message when device not found"""
+        print(f"Error: XIAO device not found (VID:PID {self.vid}:{self.pid})")
+        print("\nAvailable hidraw devices:")
+        
+        found_any = False
+        for hidraw_path in glob.glob('/dev/hidraw*'):
+            vid, pid = self.get_device_ids(hidraw_path)
+            if vid and pid:
+                print(f"  {hidraw_path} - VID:PID = {vid}:{pid}")
+                found_any = True
+        
+        if not found_any:
+            print("  (none found)")
+        
+        print("\nTip: Use --device /dev/hidrawX to specify device manually")
+    
     def connect(self):
         """
         Open HID device connection
@@ -105,32 +122,7 @@ class XiaoHIDReader:
                 self.device_path = self.find_device()
             
             if not self.device_path:
-                print(f"Error: XIAO device not found (VID:PID {self.vid}:{self.pid})")
-                print("\nAvailable hidraw devices:")
-                for hidraw_path in glob.glob('/dev/hidraw*'):
-                    vid, pid = self.get_device_ids(hidraw_path)
-                    print(f"  {hidraw_path}")
-                    if vid and pid:
-                        print(f"    VID:PID = {vid}:{pid}")
-                        if vid == self.vid.lower() and pid == self.pid.lower():
-                            print(f"    *** This is the XIAO! Use: --device {hidraw_path}")
-                    else:
-                        # Try udevadm as fallback
-                        try:
-                            result = subprocess.run(
-                                ['udevadm', 'info', hidraw_path],
-                                capture_output=True,
-                                text=True,
-                                timeout=1
-                            )
-                            if result.returncode == 0:
-                                for line in result.stdout.split('\n'):
-                                    if 'ID_VENDOR_ID' in line or 'ID_MODEL_ID' in line or 'ID_SERIAL' in line:
-                                        print(f"    {line.split('=')[1] if '=' in line else line}")
-                        except Exception:
-                            print("    (no device info available)")
-                    print()
-                print("\nTip: Use --device /dev/hidrawX to specify device manually")
+                self._print_device_not_found()
                 return False
 
             if self.debug:
@@ -139,6 +131,13 @@ class XiaoHIDReader:
             # Open device with raw file operations (non-blocking)
             self.device_fd = os.open(self.device_path, os.O_RDWR | os.O_NONBLOCK)
             
+            # Validate device is actually responsive (not a phantom)
+            if not self._validate_device():
+                os.close(self.device_fd)
+                self.device_fd = None
+                print(f"Error: Device file exists but device is not responsive")
+                return False
+            
             print(f"Connected: XIAO SAMD21 (raw hidraw)")
             print(f"Device: {self.device_path}")
             print(f"VID:PID: {self.vid}:{self.pid}\n")
@@ -146,13 +145,7 @@ class XiaoHIDReader:
 
         except PermissionError:
             print(f"Error: Permission denied accessing {self.device_path}")
-            print("\nTry one of these fixes:")
-            print("1. Add udev rule (recommended):")
-            print('   echo \'KERNEL=="hidraw*", ATTRS{idVendor}=="2886", ATTRS{idProduct}=="802f", MODE="0666", TAG+="uaccess"\' | sudo tee /etc/udev/rules.d/99-xiao.rules')
-            print("   sudo udevadm control --reload-rules")
-            print("   sudo udevadm trigger")
-            print("\n2. Run with sudo (not recommended for permanent use):")
-            print(f"   sudo python3 {' '.join(os.sys.argv)}")
+            print(f"Tip: Run './install_udev.sh' to fix permissions or use --device /dev/hidrawX")
             return False
 
         except Exception as e:
@@ -211,6 +204,13 @@ class XiaoHIDReader:
         except BlockingIOError:
             # No data available (non-blocking read)
             pass
+        except OSError as e:
+            # Device disconnected or file descriptor invalid
+            if self.debug:
+                print(f"[HID] Device disconnected: {e}")
+            # Close and mark as disconnected
+            self.close()
+            raise  # Re-raise so handler can detect disconnection
         except Exception as e:
             if self.debug:
                 print(f"[HID] Read error: {e}")
@@ -236,6 +236,58 @@ class XiaoHIDReader:
             except Exception:
                 pass
             self.device_fd = None
+        # Clear device path to force re-scan on reconnect
+        # (device file may still exist even after physical disconnect)
+        self.device_path = None
+    
+    def is_connected(self) -> bool:
+        """Check if device is still connected and responsive"""
+        if self.device_fd is None:
+            return False
+        
+        # Check if device path still exists (not reliable alone)
+        if self.device_path and not os.path.exists(self.device_path):
+            return False
+        
+        # Best check: verify file descriptor is still valid
+        try:
+            import fcntl
+            # F_GETFL will raise OSError if FD is invalid
+            fcntl.fcntl(self.device_fd, fcntl.F_GETFL)
+            return True
+        except OSError:
+            # File descriptor is invalid (device disconnected)
+            return False
+        except Exception:
+            # Other errors - assume disconnected for safety
+            return False
+    
+    def _validate_device(self) -> bool:
+        """Validate device is responsive after opening (lightweight check)"""
+        try:
+            # Check device path exists
+            if not os.path.exists(self.device_path):
+                return False
+            
+            # Try to verify device is accessible via udevadm
+            # (if udevadm fails, device file might be stale)
+            result = subprocess.run(
+                ['udevadm', 'info', '--query=property', self.device_path],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+            
+            # If udevadm can query it, device is valid
+            # (find_device already verified VID/PID before we got here)
+            return result.returncode == 0
+            
+        except subprocess.TimeoutExpired:
+            # Timeout means device is probably stale
+            return False
+        except Exception:
+            # If validation fails, try anyway (better false positive than negative)
+            return True
     
     def __enter__(self):
         """Context manager entry"""

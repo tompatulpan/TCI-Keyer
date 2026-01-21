@@ -23,6 +23,7 @@ usb_hid:
   vendor_id: '2886'
   product_id: 802f
   debug: false
+  auto_reconnect: true  # Automatically monitor and reconnect if device is unplugged
 vail_adapter:
   enabled: true
   keyer_mode: 8
@@ -31,15 +32,15 @@ vail_adapter:
   output_mode: keyboard
   allow_dynamic_speed: true
 function_keys:
-  F1: CQ CQ CQ DE {callsign} {callsign} K
-  F2: '{callsign}'
-  F3: '{callsign} 599'
+  F1: '{callsign}'
+  F2: 5nn
+  F3: CQ CQ CQ DE {callsign} {callsign} K
   F4: TU 73 DE {callsign}
-  F5: QRZ? DE {callsign} K
+  F5: QRZ?
   F6: PSE QRS
   F7: QRL?
-  F8: TEST DE {callsign}
+  F8: TEST V V DE {callsign}
   F9: TEST
   F10: ''
-  F11: ''
+  F11: tnx ur 559 559 bk
   F12: ''

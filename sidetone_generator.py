@@ -106,13 +106,15 @@ class SidetoneGenerator:
         """
         chunk_size = 128  # Match frames_per_buffer for consistency
         
-        # Pre-calculate constants for efficiency
-        phase_increment = self.frequency / self.sample_rate
+        # Pre-calculate constants for efficiency (fixed values)
         rise_rate = 1.0 / (self.rise_time * self.sample_rate)
         fall_rate = 1.0 / (self.fall_time * self.sample_rate)
         two_pi = 2.0 * np.pi
         
         while self.running:
+            # Recalculate phase_increment each loop to support frequency changes
+            phase_increment = self.frequency / self.sample_rate
+            
             # Generate audio chunk
             samples = np.zeros(chunk_size, dtype=np.float32)
             
