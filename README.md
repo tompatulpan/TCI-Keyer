@@ -9,6 +9,8 @@ Python application for controlling SunSDR radios via TCI (Transceiver Command In
 
 **Status:** 🚧 In development - Features and structure subject to change
 
+![main gui](images/GUI_1.png)
+
 ## Features
 
 ### F-Key CW Macros
