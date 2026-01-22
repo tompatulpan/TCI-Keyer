@@ -21,6 +21,18 @@ from usb_paddle_handler import USBPaddleHandler
 from sidetone_generator import SidetoneGenerator
 
 
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        # Running in normal Python environment
+        base_path = Path(__file__).parent
+    
+    return Path(base_path) / relative_path
+
+
 class TCICWController:
     """Main application controller"""
     
@@ -53,6 +65,10 @@ class TCICWController:
         self.paddle_ptt_hangtime = 1.0  # Seconds to keep PTT active after last key-up
         self.paddle_ptt_release_task = None
         
+        # Macro state tracking (for GUI LED)
+        self.macro_active = False
+        self.macro_release_task = None
+        
         # Vail firmware event buffering (50ms delay to allow TX settle)
         self.vail_event_buffer = []
         self.vail_buffer_task = None
@@ -60,9 +76,22 @@ class TCICWController:
     
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file"""
+        # For PyInstaller: config.yaml in current working directory (writable)
+        # For development: config.yaml in source directory
         config_file = Path(config_path)
+        
+        # If config doesn't exist, copy from example (bundled in PyInstaller)
         if not config_file.exists():
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+            example_file = get_resource_path("config.yaml.example")
+            if not example_file.exists():
+                example_file = get_resource_path("config.yaml")  # Fallback to bundled config
+            
+            if example_file.exists():
+                import shutil
+                shutil.copy(example_file, config_file)
+                print(f"Created config.yaml from example template")
+            else:
+                raise FileNotFoundError(f"Configuration file not found: {config_path}")
         
         with open(config_file, 'r') as f:
             return yaml.safe_load(f)
@@ -403,11 +432,27 @@ class TCICWController:
         
         self.logger.info(f"Sending CW macro: {message}")
         
+        # Set macro active flag for GUI LED
+        self.macro_active = True
+        
+        # Cancel any pending release task
+        if self.macro_release_task:
+            self.macro_release_task.cancel()
+            self.macro_release_task = None
+        
         try:
             force_ptt = self.config['tci'].get('force_ptt', False)
             await self.tci_client.send_cw_macros(message, force_ptt=force_ptt)
+            
+            # Schedule macro_active to turn off after 500ms
+            async def clear_macro_flag():
+                await asyncio.sleep(0.5)
+                self.macro_active = False
+            
+            self.macro_release_task = asyncio.create_task(clear_macro_flag())
         except Exception as e:
             self.logger.error(f"Error sending CW macro: {e}")
+            self.macro_active = False
     
     async def send_macro(self, message: str):
         """
@@ -519,12 +564,12 @@ class TCICWController:
             # Update internal config
             self.config = config.copy()
             
-            # Write to file
+            # Write to file in current directory (writable location)
             config_path = Path("config.yaml")
             with open(config_path, 'w') as f:
                 yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
             
-            self.logger.info(f"Config saved to {config_path}")
+            self.logger.info(f"Config saved to {config_path.absolute()}")
             
         except Exception as e:
             self.logger.error(f"Error saving config: {e}")
@@ -598,26 +643,26 @@ class TCICWController:
                 
             else:
                 # For Python iambic: normal processing
-                force_ptt = False
+                force_ptt = self.config['tci'].get('force_ptt', False)
                 settle_time_ms = 0
                 
+                # Only enable PTT manually if NOT using force_ptt
+                # (force_ptt lets send_keyer handle TX enable with precise timing)
                 if key_down and not self.paddle_ptt_active:
-                    # Enable TX (switches to CW mode if needed)
-                    force_ptt = self.config['tci'].get('force_ptt', False)
-                    if not force_ptt:
-                        await self._enable_paddle_ptt()
-                    else:
-                        # Settle time will be applied in send_keyer
-                        await self._enable_paddle_ptt()
+                    if force_ptt:
+                        # Let send_keyer() handle TX enable with precise timing
                         settle_time_ms = int(self.config['cw'].get('tx_settle_time', 0.050) * 1000)
-
+                        self.paddle_ptt_active = True  # Mark as active (send_keyer will enable)
+                    else:
+                        # Enable TX manually (switches to CW mode if needed)
+                        await self._enable_paddle_ptt()
                 
                 # Cancel any pending PTT release when new keying starts
                 if self.paddle_ptt_release_task and key_down:
                     self.paddle_ptt_release_task.cancel()
                     self.paddle_ptt_release_task = None
                 
-                # Send KEYER command (settle delay only for Python iambic first element)
+                # Send KEYER command (force_ptt lets send_keyer handle TX with delay)
                 await self.tci_client.send_keyer(key_down, previous_duration_ms, 
                                                 force_ptt=force_ptt, 
                                                 settle_time_ms=settle_time_ms)

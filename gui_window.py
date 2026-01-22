@@ -9,6 +9,7 @@ from tkinter import ttk, scrolledtext, messagebox
 import asyncio
 import threading
 import logging
+from version import get_version_string
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,8 @@ class TkinterGUI:
         self.controller = controller
         self.loop = loop
         self.root = tk.Tk()
-        self.root.title("TCI CW Controller")
-        self.root.geometry("640x660")
+        self.root.title(f"TCI CW Controller {get_version_string()}")
+        self.root.geometry("570x660")
         
         # Configuration cache (edited in memory, saved on button)
         self.config = controller.config.copy()
@@ -45,7 +46,7 @@ class TkinterGUI:
         self.tci_status_var = tk.StringVar(value="Disconnected")
         self.usb_status_var = tk.StringVar(value="Disconnected")
         self.usb_device_var = tk.StringVar(value="Unknown")
-        self.active_macro_var = tk.StringVar(value="Idle")
+        self.active_macro_indicator = None  # Will be set in _create_status_frame
         
         # Macro text widgets (for live editing)
         self.macro_entries = {}  # F1-F12 -> Text widget
@@ -127,9 +128,10 @@ class TkinterGUI:
         ttk.Label(frame, textvariable=self.usb_device_var,
                  font=('TkDefaultFont', 9)).grid(row=0, column=5, sticky=tk.W, padx=5)
         
-        ttk.Label(frame, text="Active:").grid(row=0, column=6, sticky=tk.W, padx=(15, 5))
-        ttk.Label(frame, textvariable=self.active_macro_var,
-                 font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=7, sticky=tk.W, padx=5)
+        # Active macro LED indicator (no label, just LED)
+        self.active_macro_indicator = tk.Label(frame, text="●", fg="gray", 
+                                               font=('Arial', 16), width=1)
+        self.active_macro_indicator.grid(row=0, column=6, sticky=tk.W, padx=(15, 5))
         
     def _create_macros_frame(self, parent):
         """Compact F-key macro buttons"""
@@ -303,8 +305,8 @@ class TkinterGUI:
         callsign = self.config['operator']['callsign']
         message = text.replace('{callsign}', callsign)
         
-        # Update active macro indicator
-        self.active_macro_var.set(f"{fkey}: Sending...")
+        # Update active macro indicator (LED to bright green)
+        self.active_macro_indicator.config(fg="#00ff00")
         
         # Send via controller (async)
         future = asyncio.run_coroutine_threadsafe(
@@ -312,8 +314,8 @@ class TkinterGUI:
             self.loop
         )
         
-        # Clear indicator after send
-        self.root.after(500, lambda: self.active_macro_var.set("Idle"))
+        # Clear indicator after send (LED back to gray)
+        self.root.after(500, lambda: self.active_macro_indicator.config(fg="gray"))
         
         logger.info(f"[GUI] {fkey} clicked: {message}")
         
@@ -537,6 +539,15 @@ class TkinterGUI:
                 self.usb_status_var.set("Disconnected")
                 self.usb_indicator.config(bg="red")
                 self.usb_device_var.set("None")
+            
+            # Update active LED indicator (green when paddle or macro active, gray when idle)
+            paddle_active = hasattr(self.controller, 'paddle_ptt_active') and self.controller.paddle_ptt_active
+            macro_active = hasattr(self.controller, 'macro_active') and self.controller.macro_active
+            
+            if paddle_active or macro_active:
+                self.active_macro_indicator.config(fg="#00ff00")
+            else:
+                self.active_macro_indicator.config(fg="gray")
                 
         except Exception as e:
             logger.error(f"[GUI] Status update error: {e}")
