@@ -137,9 +137,8 @@ class TCICWController:
             
             self.logger.info(f"Initial state: mode={self.tci_client.current_mode}, drive={self.tci_client.drive_level}%")
             
-            # Set CW mode and speed
+            # Set CW speed (mode is set manually from ExpertSDR3)
             cw_config = self.config['cw']
-            await self.tci_client.set_mode_cw(cw_config.get('default_mode', 'CW'))
             await self.tci_client.set_cw_speed(cw_config.get('speed_wpm', 25))
         
         return success
