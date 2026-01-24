@@ -8,15 +8,17 @@ tci:
   keepalive_ping: false
 operator:
   callsign: SM0ONR
+keyboard:
+  ptt_toggle_key: scroll_lock
 cw:
   default_mode: CW
-  speed_wpm: 25
+  speed_wpm: 28
   keyer_mode: iambic-b
   tx_settle_time: 0.05
 sidetone:
   enabled: true
-  frequency: 510
-  volume: 0.28440366972477066
+  frequency: 572
+  volume: 0.5254629629629629
 usb_hid:
   enabled: true
   device_path: null
@@ -27,8 +29,8 @@ usb_hid:
 vail_adapter:
   enabled: true
   keyer_mode: 8
-  speed_wpm: 25
-  sidetone_note: 72
+  speed_wpm: 28
+  sidetone_note: 74
   output_mode: keyboard
   allow_dynamic_speed: true
 function_keys:
@@ -44,3 +46,10 @@ function_keys:
   F10: ''
   F11: tnx ur 559 559 bk
   F12: ''
+mouse_macros:
+  M1: CQ TEST DE {callsign} K
+  M2: AGN?
+  M3: RR
+  M4: BK
+  M5: ''
+  M6: ''

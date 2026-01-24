@@ -60,8 +60,9 @@ class TCICWController:
         self.running = False
         self.reconnect_task = None
         
-        # PTT state tracking for paddle keying
-        self.paddle_ptt_active = False
+        # PTT state tracking
+        self.manual_ptt_active = False  # Manual PTT toggle (via keyboard/GUI)
+        self.paddle_ptt_active = False  # Automatic PTT for paddle keying
         self.paddle_ptt_hangtime = 1.0  # Seconds to keep PTT active after last key-up
         self.paddle_ptt_release_task = None
         
@@ -147,14 +148,18 @@ class TCICWController:
         """Initialize F-key keyboard handler"""
         self.logger.info("Initializing F-key handler")
         
+        ptt_toggle_key = self.config.get('keyboard', {}).get('ptt_toggle_key', 'scroll_lock')
+        
         self.keyboard_handler = KeyboardHandler(
             function_keys=self.config['function_keys'],
             callsign=self.config['operator']['callsign'],
-            loop=asyncio.get_event_loop()
+            loop=asyncio.get_event_loop(),
+            ptt_toggle_key=ptt_toggle_key
         )
         
-        # Setup callback
+        # Setup callbacks
         self.keyboard_handler.on_macro_send = self._on_macro_send
+        self.keyboard_handler.on_ptt_toggle = self._on_ptt_toggle
         
         self.keyboard_handler.start()
     
@@ -342,20 +347,21 @@ class TCICWController:
     
     async def _enable_paddle_ptt(self) -> bool:
         """
-        Enable PTT for paddle keying (switches to CW mode if needed)
+        Enable PTT for paddle keying (only if PTT permission is enabled)
         
         Returns:
-            True if PTT enabled successfully
+            True if PTT enabled successfully, False if permission not granted
         """
+        if not self.manual_ptt_active:
+            ptt_key = self.config.get('keyboard', {}).get('ptt_toggle_key', 'scroll_lock')
+            self.logger.warning(f"Paddle keying blocked: PTT permission is OFF (press {ptt_key.upper()} or GUI button to enable)")
+            return False
+        
         if not self.paddle_ptt_active:
-            # Switch to CW mode if needed
-            if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
-                await self.tci_client.set_mode_cw()
-            
-            # Enable PTT
+            # Permission granted - activate PTT
             await self.tci_client.set_ptt(True)
             self.paddle_ptt_active = True
-            self.logger.debug("TX enabled for paddle keying")
+            self.logger.debug("Paddle PTT enabled (permission granted)")
             return True
         return False  # Already active
     
@@ -379,12 +385,15 @@ class TCICWController:
         if hasattr(self, 'use_vail_firmware') and self.use_vail_firmware:
             asyncio.create_task(self._pre_arm_vail_tx())
         
+        ptt_key = self.config.get('keyboard', {}).get('ptt_toggle_key', 'scroll_lock')
+        
         print("\n" + "="*60)
         print("TCI CW CONTROLLER READY")
         print("="*60)
-        print("F1-F12: Send CW macros")
+        print(f"{ptt_key.upper()}: Enable/Disable PTT permission")
+        print("F1-F12: Send CW macros (requires PTT permission)")
         if self.usb_paddle_handler:
-            print("USB Paddle: Manual keying")
+            print("USB Paddle: Manual keying (requires PTT permission)")
         print("Ctrl+C: Quit")
         print("="*60 + "\n")
     
@@ -417,6 +426,31 @@ class TCICWController:
         if message.startswith(('VFO:', 'MODULATION:', 'TRX:', 'drive:')):
             self.logger.debug(f"TCI: {message}")
     
+    async def _on_ptt_toggle(self):
+        """
+        Callback when PTT toggle key is pressed or GUI button clicked
+        Toggles PTT permission (acts as gate for keyer/macro PTT commands)
+        """
+        if not self.tci_client or not self.tci_client.ready:
+            self.logger.warning("Cannot toggle PTT: TCI not ready")
+            return
+        
+        self.manual_ptt_active = not self.manual_ptt_active
+        
+        if self.manual_ptt_active:
+            self.logger.info("✓ PTT Permission: ENABLED")
+            print("\n[PTT] Permission ENABLED - keyer/macros can activate TX\n")
+        else:
+            # Disable permission and force PTT off if currently active
+            self.logger.info("✓ PTT Permission: DISABLED")
+            print("\n[PTT] Permission DISABLED - TX blocked\n")
+            
+            # If PTT is currently active, turn it off
+            if self.paddle_ptt_active:
+                await self.tci_client.set_ptt(False)
+                self.paddle_ptt_active = False
+                self.logger.debug("PTT released due to permission disable")
+    
     async def _on_macro_send(self, key_name: str, message: str):
         """
         Callback when F-key macro is pressed (called from pynput thread via run_coroutine_threadsafe)
@@ -427,6 +461,13 @@ class TCICWController:
         """
         if not self.tci_client or not self.tci_client.ready:
             self.logger.warning(f"Cannot send {key_name}: TCI not ready")
+            return
+        
+        # Check PTT permission
+        if not self.manual_ptt_active:
+            ptt_key = self.config.get('keyboard', {}).get('ptt_toggle_key', 'scroll_lock')
+            self.logger.warning(f"Macro blocked: PTT permission is OFF (press {ptt_key.upper()} or GUI button to enable)")
+            print(f"\n[BLOCKED] {key_name} - PTT permission disabled\n")
             return
         
         self.logger.info(f"Sending CW macro: {message}")
@@ -845,24 +886,17 @@ class TCICWController:
             return False
     
     async def _pre_arm_vail_tx(self):
-        """Pre-arm TX for Vail firmware at startup to prevent first element clipping"""
+        """Pre-arm preparation for Vail firmware (PTT permission required)"""
         try:
             await asyncio.sleep(0.5)  # Wait for TCI to stabilize
             
             if self.tci_client and self.tci_client.ready:
-                # Set CW mode
-                if self.tci_client.current_mode not in ('CW', 'CWL', 'CWU'):
-                    await self.tci_client.set_mode_cw()
-                
-                # Enable TX and wait for settle
-                await self.tci_client.set_ptt(True)
                 tx_settle_time = self.config['cw'].get('tx_settle_time', 0.050)
-                await asyncio.sleep(tx_settle_time)
-                
-                self.paddle_ptt_active = True
-                self.logger.info(f"Vail firmware: TX pre-armed at startup (settle={tx_settle_time*1000:.0f}ms)")
+                ptt_key = self.config.get('keyboard', {}).get('ptt_toggle_key', 'scroll_lock')
+                self.logger.info(f"Vail firmware ready (settle time: {tx_settle_time*1000:.0f}ms)")
+                self.logger.info(f"Press {ptt_key.upper()} or GUI button to enable PTT permission before keying")
         except Exception as e:
-            self.logger.error(f"Failed to pre-arm TX for Vail firmware: {e}")
+            self.logger.error(f"Failed to prepare Vail firmware: {e}")
     
     async def _release_paddle_ptt_after_hangtime(self):
         """Release paddle PTT after hangtime delay"""

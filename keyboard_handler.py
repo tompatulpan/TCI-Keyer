@@ -25,7 +25,7 @@ except ImportError:
 class KeyboardHandler:
     """Handle F1-F12 keyboard input for CW macros"""
     
-    def __init__(self, function_keys: Dict[str, str], callsign: str, loop: asyncio.AbstractEventLoop = None):
+    def __init__(self, function_keys: Dict[str, str], callsign: str, loop: asyncio.AbstractEventLoop = None, ptt_toggle_key: str = 'scroll_lock'):
         """
         Initialize keyboard handler
         
@@ -33,15 +33,18 @@ class KeyboardHandler:
             function_keys: Dict mapping F-key names to CW message templates
             callsign: Operator callsign for {callsign} substitution
             loop: Event loop for thread-safe coroutine scheduling
+            ptt_toggle_key: Key name for PTT toggle (default: scroll_lock)
         """
         self.function_keys = function_keys
         self.callsign = callsign
         self.listener: Optional[keyboard.Listener] = None
         self.running = False
         self.loop = loop
+        self.ptt_toggle_key = ptt_toggle_key
         
-        # Callback when F-key pressed (called from pynput thread)
+        # Callbacks (called from pynput thread)
         self.on_macro_send: Optional[Callable[[str, str], None]] = None
+        self.on_ptt_toggle: Optional[Callable[[], None]] = None
         
         self.logger = logging.getLogger("KeyboardHandler")
         self.logger.info(f"pynput backend: {PYNPUT_BACKEND}")
@@ -66,6 +69,16 @@ class KeyboardHandler:
             key: Key object from pynput
         """
         try:
+            # Check for PTT toggle key
+            if hasattr(key, 'name') and key.name == self.ptt_toggle_key:
+                self.logger.debug(f"PTT toggle key pressed: {self.ptt_toggle_key}")
+                if self.on_ptt_toggle and self.loop:
+                    asyncio.run_coroutine_threadsafe(
+                        self.on_ptt_toggle(),
+                        self.loop
+                    )
+                return
+            
             # Check if it's a function key
             if hasattr(key, 'name') and key.name.startswith('f'):
                 key_name = key.name.upper()  # f1 → F1

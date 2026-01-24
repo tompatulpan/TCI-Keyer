@@ -37,7 +37,7 @@ class TkinterGUI:
         self.loop = loop
         self.root = tk.Tk()
         self.root.title(f"TCI CW Controller {get_version_string()}")
-        self.root.geometry("570x660")
+        self.root.geometry("760x680")
         
         # Configuration cache (edited in memory, saved on button)
         self.config = controller.config.copy()
@@ -133,22 +133,44 @@ class TkinterGUI:
                                                font=('Arial', 16), width=1)
         self.active_macro_indicator.grid(row=0, column=6, sticky=tk.W, padx=(15, 5))
         
+        # PTT Permission button
+        self.ptt_button = tk.Button(frame, text="PTT: BLOCKED", bg="red", fg="white",
+                                    font=('TkDefaultFont', 9, 'bold'), width=12,
+                                    command=self._toggle_ptt)
+        self.ptt_button.grid(row=0, column=7, padx=(15, 5))
+        
     def _create_macros_frame(self, parent):
         """Compact F-key macro buttons"""
-        frame = ttk.LabelFrame(parent, text="F-Key Macros (use {callsign} for substitution)", padding="10")
+        frame = ttk.LabelFrame(parent, text="Macros (use {callsign} for substitution)", padding="10")
         frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
         parent.rowconfigure(2, weight=1)
         
-        # Create 12 compact macro editors (2 columns x 6 rows)
+        # Create 12 F-key macros (2 columns x 6 rows)
         for i in range(1, 13):
             row = (i - 1) // 2
             col = (i - 1) % 2
             
             fkey = f"F{i}"
             self._create_compact_macro_editor(frame, fkey, row, col)
+        
+        # Create 6 mouse-only macros (3rd column)
+        for i in range(1, 7):
+            row = i - 1
+            col = 2
             
-    def _create_compact_macro_editor(self, parent, fkey, row, col):
-        """Create compact F-key editor widget (button + entry only)"""
+            mkey = f"M{i}"
+            self._create_compact_macro_editor(frame, mkey, row, col, config_section='mouse_macros')
+            
+    def _create_compact_macro_editor(self, parent, fkey, row, col, config_section='function_keys'):
+        """Create compact F-key editor widget (button + entry only)
+        
+        Args:
+            parent: Parent widget
+            fkey: Key name (F1-F12 or M1-M6)
+            row: Grid row
+            col: Grid column
+            config_section: Config section name ('function_keys' or 'mouse_macros')
+        """
         container = ttk.Frame(parent)
         container.grid(row=row, column=col, padx=5, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
         
@@ -161,11 +183,15 @@ class TkinterGUI:
         text_widget = tk.Entry(container, width=18)
         text_widget.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0))
         
+        # Initialize config section if not exists
+        if config_section not in self.config:
+            self.config[config_section] = {}
+        
         # Load current macro text
-        current_text = self.config['function_keys'].get(fkey, "")
+        current_text = self.config[config_section].get(fkey, "")
         text_widget.insert(0, current_text)
         
-        # Store reference
+        # Store reference with section prefix to avoid key conflicts
         self.macro_entries[fkey] = text_widget
         
         # Make entry expandable
@@ -292,8 +318,27 @@ class TkinterGUI:
         """Update preview label with callsign substitution (removed - for compact GUI)"""
         pass
             
+    def _toggle_ptt(self):
+        """Toggle PTT permission via GUI button"""
+        try:
+            # Call controller's PTT toggle via asyncio
+            asyncio.run_coroutine_threadsafe(
+                self.controller._on_ptt_toggle(),
+                self.loop
+            )
+            
+            # Update button immediately (will be confirmed by status update)
+            if hasattr(self.controller, 'manual_ptt_active'):
+                if self.controller.manual_ptt_active:
+                    self.ptt_button.config(text="PTT: ENABLED", bg="green")
+                else:
+                    self.ptt_button.config(text="PTT: BLOCKED", bg="red")
+        except Exception as e:
+            logger.error(f"Error toggling PTT: {e}")
+            messagebox.showerror("PTT Error", f"Failed to toggle PTT: {e}")
+    
     def _send_macro(self, fkey):
-        """Send F-key macro via controller"""
+        """Send macro via controller (supports F1-F12 and M1-M6)"""
         # Get current text from entry widget
         text = self.macro_entries[fkey].get().strip()
         
@@ -414,8 +459,15 @@ class TkinterGUI:
         self.config['operator']['callsign'] = self.callsign_var.get().upper()
         self.config['cw']['keyer_mode'] = self.keyer_mode_var.get()
         
+        # Initialize mouse_macros if not exists
+        if 'mouse_macros' not in self.config:
+            self.config['mouse_macros'] = {}
+        
         for fkey, text_widget in self.macro_entries.items():
-            self.config['function_keys'][fkey] = text_widget.get()
+            if fkey.startswith('M'):
+                self.config['mouse_macros'][fkey] = text_widget.get()
+            else:
+                self.config['function_keys'][fkey] = text_widget.get()
             
         self.config['cw']['speed_wpm'] = self.cw_speed_var.get()
         self.config['sidetone']['frequency'] = self.sidetone_freq_var.get()
@@ -466,7 +518,10 @@ class TkinterGUI:
             
             for fkey, text_widget in self.macro_entries.items():
                 text_widget.delete(0, tk.END)
-                text_widget.insert(0, self.config['function_keys'].get(fkey, ""))
+                if fkey.startswith('M'):
+                    text_widget.insert(0, self.config.get('mouse_macros', {}).get(fkey, ""))
+                else:
+                    text_widget.insert(0, self.config['function_keys'].get(fkey, ""))
                 
             # Update slider values
             self.cw_speed_var.set(self.config['cw']['speed_wpm'])
@@ -548,6 +603,13 @@ class TkinterGUI:
                 self.active_macro_indicator.config(fg="#00ff00")
             else:
                 self.active_macro_indicator.config(fg="gray")
+            
+            # Update PTT button state
+            if hasattr(self.controller, 'manual_ptt_active'):
+                if self.controller.manual_ptt_active:
+                    self.ptt_button.config(text="PTT: ENABLED", bg="green")
+                else:
+                    self.ptt_button.config(text="PTT: BLOCKED", bg="red")
                 
         except Exception as e:
             logger.error(f"[GUI] Status update error: {e}")
