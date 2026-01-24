@@ -119,25 +119,30 @@ class TkinterGUI:
                                       bg="red", fg="white", width=12, relief=tk.SUNKEN)
         self.tci_indicator.grid(row=0, column=1, padx=5)
         
-        ttk.Label(frame, text="USB:").grid(row=0, column=2, sticky=tk.W, padx=(15, 5))
+        # Reconnect button (only shown when disconnected)
+        self.reconnect_button = ttk.Button(frame, text="Reconnect", command=self._reconnect_tci)
+        self.reconnect_button.grid(row=0, column=2, padx=5)
+        self.reconnect_button.grid_remove()  # Hidden initially
+        
+        ttk.Label(frame, text="USB:").grid(row=0, column=3, sticky=tk.W, padx=(15, 5))
         self.usb_indicator = tk.Label(frame, textvariable=self.usb_status_var,
                                       bg="red", fg="white", width=12, relief=tk.SUNKEN)
-        self.usb_indicator.grid(row=0, column=3, padx=5)
+        self.usb_indicator.grid(row=0, column=4, padx=5)
         
-        ttk.Label(frame, text="Device:").grid(row=0, column=4, sticky=tk.W, padx=(15, 5))
+        ttk.Label(frame, text="Device:").grid(row=0, column=5, sticky=tk.W, padx=(15, 5))
         ttk.Label(frame, textvariable=self.usb_device_var,
-                 font=('TkDefaultFont', 9)).grid(row=0, column=5, sticky=tk.W, padx=5)
+                 font=('TkDefaultFont', 9)).grid(row=0, column=6, sticky=tk.W, padx=5)
         
         # Active macro LED indicator (no label, just LED)
         self.active_macro_indicator = tk.Label(frame, text="●", fg="gray", 
                                                font=('Arial', 16), width=1)
-        self.active_macro_indicator.grid(row=0, column=6, sticky=tk.W, padx=(15, 5))
+        self.active_macro_indicator.grid(row=0, column=7, sticky=tk.W, padx=(15, 5))
         
         # PTT Permission button
         self.ptt_button = tk.Button(frame, text="PTT: BLOCKED", bg="red", fg="white",
                                     font=('TkDefaultFont', 9, 'bold'), width=12,
                                     command=self._toggle_ptt)
-        self.ptt_button.grid(row=0, column=7, padx=(15, 5))
+        self.ptt_button.grid(row=0, column=8, padx=(15, 5))
         
     def _create_macros_frame(self, parent):
         """Compact F-key macro buttons"""
@@ -575,9 +580,11 @@ class TkinterGUI:
             if self.controller.tci_client and self.controller.tci_client.ready:
                 self.tci_status_var.set("Connected")
                 self.tci_indicator.config(bg="green")
+                self.reconnect_button.grid_remove()  # Hide reconnect button when connected
             else:
                 self.tci_status_var.set("Disconnected")
                 self.tci_indicator.config(bg="red")
+                self.reconnect_button.grid()  # Show reconnect button when disconnected
                 
             # USB paddle status and device type
             if self.controller.usb_paddle_handler and self.controller.usb_paddle_handler.running:
@@ -635,6 +642,29 @@ class TkinterGUI:
     def _schedule_status_update(self):
         """Start status polling"""
         self._update_status()
+    
+    def _reconnect_tci(self):
+        """Attempt to reconnect to TCI server"""
+        logger.info("[GUI] User requested TCI reconnection")
+        
+        # Schedule reconnection in background thread
+        async def reconnect():
+            try:
+                if self.controller.tci_client:
+                    # Try to reconnect existing client
+                    await self.controller._initialize_tci()
+                    if self.controller.tci_client.ready:
+                        logger.info("[GUI] TCI reconnected successfully")
+                        self.controller.initialization_failed = False
+                        # Restart receive loop
+                        asyncio.create_task(self.controller.tci_client.receive_loop())
+                    else:
+                        logger.error("[GUI] TCI reconnection failed")
+            except Exception as e:
+                logger.error(f"[GUI] TCI reconnection error: {e}")
+        
+        # Run in controller's event loop
+        future = asyncio.run_coroutine_threadsafe(reconnect(), self.loop)
         
     def run(self):
         """Start GUI main loop"""

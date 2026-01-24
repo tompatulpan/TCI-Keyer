@@ -59,6 +59,7 @@ class TCICWController:
         # State
         self.running = False
         self.reconnect_task = None
+        self.initialization_failed = False  # Flag to indicate startup connection failure
         
         # PTT state tracking
         self.manual_ptt_active = False  # Manual PTT toggle (via keyboard/GUI)
@@ -970,6 +971,7 @@ class TCICWController:
             # Initialize TCI connection
             if not await self._initialize_tci():
                 self.logger.error("Failed to connect to TCI server")
+                self.initialization_failed = True
                 return 1
             
             # Initialize keyboard handler
@@ -1076,10 +1078,41 @@ async def main():
             if controller.tci_client and controller.tci_client.ready:
                 logging.info("Controller initialized and ready")
                 break
+            if controller.initialization_failed:
+                logging.error("Controller initialization failed")
+                break
             time.sleep(wait_step)
             waited += wait_step
         
-        if waited >= max_wait:
+        if controller.initialization_failed:
+            # Show error dialog and offer to retry or exit
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()  # Hide root window
+            
+            retry = messagebox.askretrycancel(
+                "Connection Failed",
+                "Failed to connect to TCI server at localhost:40001.\n\n"
+                "Possible causes:\n"
+                "• ExpertSDR3 not running\n"
+                "• TCI server not enabled in ExpertSDR3 settings\n"
+                "• Incorrect host/port configuration\n\n"
+                "Would you like to retry?"
+            )
+            
+            root.destroy()
+            
+            if retry:
+                # User chose retry - restart application
+                logging.info("User requested retry - restarting...")
+                import os
+                os.execv(sys.executable, ['python'] + sys.argv)
+            else:
+                # User chose cancel - exit gracefully
+                logging.info("User cancelled - exiting")
+                sys.exit(1)
+        elif waited >= max_wait:
             logging.warning("Controller initialization timeout - GUI may show incorrect status")
         
         # Create and run GUI in main thread (blocks until window closed)
