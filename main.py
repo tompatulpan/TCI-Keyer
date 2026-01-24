@@ -1079,41 +1079,15 @@ async def main():
                 logging.info("Controller initialized and ready")
                 break
             if controller.initialization_failed:
-                logging.error("Controller initialization failed")
+                logging.warning("TCI connection failed - starting GUI in disconnected mode")
+                logging.info("Use the Reconnect button to retry connection when TCI server is available")
                 break
             time.sleep(wait_step)
             waited += wait_step
         
-        if controller.initialization_failed:
-            # Show error dialog and offer to retry or exit
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()  # Hide root window
-            
-            retry = messagebox.askretrycancel(
-                "Connection Failed",
-                "Failed to connect to TCI server at localhost:40001.\n\n"
-                "Possible causes:\n"
-                "• ExpertSDR3 not running\n"
-                "• TCI server not enabled in ExpertSDR3 settings\n"
-                "• Incorrect host/port configuration\n\n"
-                "Would you like to retry?"
-            )
-            
-            root.destroy()
-            
-            if retry:
-                # User chose retry - restart application
-                logging.info("User requested retry - restarting...")
-                import os
-                os.execv(sys.executable, ['python'] + sys.argv)
-            else:
-                # User chose cancel - exit gracefully
-                logging.info("User cancelled - exiting")
-                sys.exit(1)
-        elif waited >= max_wait:
-            logging.warning("Controller initialization timeout - GUI may show incorrect status")
+        if waited >= max_wait:
+            logging.warning("Controller initialization timeout - starting GUI anyway")
+            logging.info("GUI will show connection status and allow manual reconnection")
         
         # Create and run GUI in main thread (blocks until window closed)
         gui = TkinterGUI(controller, loop)
