@@ -37,7 +37,7 @@ class TkinterGUI:
         self.loop = loop
         self.root = tk.Tk()
         self.root.title(f"TCI CW Controller {get_version_string()}")
-        self.root.geometry("780x680")
+        # self.root.geometry("780x680")
         
         # Configuration cache (edited in memory, saved on button)
         self.config = controller.config.copy()
