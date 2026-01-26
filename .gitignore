@@ -10,7 +10,7 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+# /dist/
 downloads/
 eggs/
 .eggs/
@@ -30,6 +30,27 @@ MANIFEST
 # PyInstaller
 *.manifest
 *.spec
+
+# Build outputs and cross-compilation artifacts
+build/
+# /dist/
+*.exe
+*.app
+
+# Wine prefix for Windows cross-compilation
+.wine/
+
+# Python installers for Wine builds
+python-*.exe
+
+# Build logs
+build_*.log
+*.log
+
+# PyInstaller build artifacts
+*.pkg
+warn-*.txt
+xref-*.html
 
 # Installer logs
 pip-log.txt
@@ -208,3 +229,5 @@ web_platform_tcp/dist/
 
 # Archive of old/test files
 archive/
+
+
