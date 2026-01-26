@@ -505,6 +505,12 @@ class TkinterGUI:
             return
             
         try:
+            # Check if controller is still active
+            if not self.controller or not self.loop or self.loop.is_closed():
+                messagebox.showerror("Reload Failed", "Controller is not running")
+                logger.error("[GUI] Config reload failed: Controller or event loop not available")
+                return
+            
             # Reload via controller
             future = asyncio.run_coroutine_threadsafe(
                 self.controller.reload_config(),
@@ -539,15 +545,19 @@ class TkinterGUI:
             self.vol_label.config(text=f"{self.config['sidetone']['volume']*100:.0f}%")
             
             # Actually apply the reloaded settings to hardware/TCI
-            logger.info("[GUI] Applying reloaded settings to hardware...")
+            if self.controller.tci_client and self.controller.tci_client.ready:
+                logger.info("[GUI] Applying reloaded settings to TCI/hardware...")
+            else:
+                logger.info("[GUI] TCI disconnected - updating local settings only")
+            
             try:
-                # Apply speed
+                # Apply speed (works with or without TCI)
                 asyncio.run_coroutine_threadsafe(
                     self.controller.update_cw_speed(self.config['cw']['speed_wpm']),
                     self.loop
                 )
                 
-                # Apply sidetone
+                # Apply sidetone (works with or without TCI)
                 asyncio.run_coroutine_threadsafe(
                     self.controller.update_sidetone(
                         self.config['sidetone']['frequency'],
@@ -561,8 +571,10 @@ class TkinterGUI:
             messagebox.showinfo("Config Reloaded", "Configuration reloaded from config.yaml")
             logger.info("[GUI] Config reloaded successfully")
         except Exception as e:
-            messagebox.showerror("Reload Failed", f"Error reloading config: {e}")
-            logger.error(f"[GUI] Config reload failed: {e}")
+            import traceback
+            error_details = traceback.format_exc()
+            messagebox.showerror("Reload Failed", f"Error reloading config:\n{str(e)}\n\nSee log for details")
+            logger.error(f"[GUI] Config reload failed: {e}\n{error_details}")
             
     def _quit(self):
         """Quit application"""
@@ -647,24 +659,31 @@ class TkinterGUI:
         """Attempt to reconnect to TCI server"""
         logger.info("[GUI] User requested TCI reconnection")
         
-        # Schedule reconnection in background thread
-        async def reconnect():
-            try:
-                if self.controller.tci_client:
-                    # Try to reconnect existing client
-                    await self.controller._initialize_tci()
-                    if self.controller.tci_client.ready:
-                        logger.info("[GUI] TCI reconnected successfully")
-                        self.controller.initialization_failed = False
-                        # Restart receive loop
-                        asyncio.create_task(self.controller.tci_client.receive_loop())
+        try:
+            # Call controller's reconnect method
+            future = asyncio.run_coroutine_threadsafe(
+                self.controller.reconnect_tci(),
+                self.loop
+            )
+            
+            # Show result after short delay
+            def check_result():
+                try:
+                    result = future.result(timeout=0.1)
+                    if result:
+                        messagebox.showinfo("TCI Server", "TCI server reconnected successfully!")
                     else:
-                        logger.error("[GUI] TCI reconnection failed")
-            except Exception as e:
-                logger.error(f"[GUI] TCI reconnection error: {e}")
-        
-        # Run in controller's event loop
-        future = asyncio.run_coroutine_threadsafe(reconnect(), self.loop)
+                        messagebox.showwarning("TCI Server", 
+                                             "TCI server not available.\\n\\n"
+                                             "Make sure ExpertSDR3 is running with TCI enabled.\\n"
+                                             "Settings → TCI → Enable TCI server (port 40001)")
+                except Exception as e:
+                    messagebox.showerror("TCI Server", f"Reconnection failed: {e}")
+            
+            self.root.after(2000, check_result)  # Give it time to connect
+        except Exception as e:
+            logger.error(f"[GUI] Error requesting TCI reconnection: {e}")
+            messagebox.showerror("TCI Server", f"Reconnection failed: {e}")
         
     def run(self):
         """Start GUI main loop"""

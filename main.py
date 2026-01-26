@@ -624,9 +624,19 @@ class TCICWController:
             Reloaded configuration dictionary
         """
         try:
+            if not self.running:
+                self.logger.warning("Controller is shutting down - config reload skipped")
+                return None
+            
             config_path = Path("config.yaml")
+            if not config_path.exists():
+                raise FileNotFoundError(f"Config file not found: {config_path}")
+            
             with open(config_path, 'r') as f:
                 new_config = yaml.safe_load(f)
+            
+            if new_config is None:
+                raise ValueError("Config file is empty or invalid YAML")
             
             # Update internal config
             self.config = new_config
@@ -912,6 +922,47 @@ class TCICWController:
             # Task was cancelled (new keying started)
             pass
     
+    async def reconnect_tci(self) -> bool:
+        """
+        Attempt to reconnect to TCI server (manual trigger from GUI)
+        
+        Returns:
+            True if reconnected successfully, False otherwise
+        """
+        self.logger.info("Manual TCI reconnection requested...")
+        
+        # If already connected, just verify
+        if self.tci_client and self.tci_client.ready:
+            self.logger.info("TCI already connected")
+            return True
+        
+        # Close existing client if present
+        if self.tci_client:
+            try:
+                await self.tci_client.disconnect()
+            except:
+                pass
+            self.tci_client = None
+        
+        # Attempt reconnection
+        success = await self._initialize_tci()
+        
+        if success:
+            self.logger.info("✓ TCI reconnected successfully")
+            self.initialization_failed = False
+            
+            # Start TCI receive loop
+            asyncio.create_task(self.tci_client.receive_loop())
+            
+            # Start keepalive if enabled
+            if self.config['tci'].get('keepalive_ping', False):
+                asyncio.create_task(self._keepalive_ping_loop())
+            
+            return True
+        else:
+            self.logger.warning("TCI reconnection failed")
+            return False
+    
     async def _reconnect_loop(self):
         """Reconnection loop with delay"""
         delay = self.config['tci'].get('reconnect_delay', 3.0)
@@ -969,39 +1020,51 @@ class TCICWController:
         
         try:
             # Initialize TCI connection
-            if not await self._initialize_tci():
-                self.logger.error("Failed to connect to TCI server")
+            tci_connected = await self._initialize_tci()
+            if not tci_connected:
+                self.logger.warning("TCI server not available - running in disconnected mode")
+                self.logger.info("USB paddle and sidetone will still work for practice")
                 self.initialization_failed = True
-                return 1
+                # Continue anyway - USB paddle and sidetone can work without TCI
             
-            # Initialize keyboard handler
+            # Initialize keyboard handler (works without TCI)
             self._initialize_keyboard()
             
-            # Initialize sidetone first (before USB paddle)
+            # Initialize sidetone first (before USB paddle) - works without TCI
             self._initialize_sidetone()
             
-            # Initialize USB paddle (optional) - needs sidetone to be ready
+            # Initialize USB paddle (optional) - needs sidetone to be ready, works without TCI
             self._initialize_usb_paddle()
             
             # Start async tasks
             tasks = []
             
-            # TCI receive loop
-            tasks.append(asyncio.create_task(self.tci_client.receive_loop()))
-            
-            # Keepalive ping task (workaround for ExpertSDR3 event loop)
-            if self.config['tci'].get('keepalive_ping', False):
-                tasks.append(asyncio.create_task(self._keepalive_ping_loop()))
+            # TCI receive loop (only if connected)
+            if tci_connected and self.tci_client:
+                tasks.append(asyncio.create_task(self.tci_client.receive_loop()))
+                
+                # Keepalive ping task (workaround for ExpertSDR3 event loop)
+                if self.config['tci'].get('keepalive_ping', False):
+                    tasks.append(asyncio.create_task(self._keepalive_ping_loop()))
             
             # Event loop wakeup task disabled - was too aggressive
             # tasks.append(asyncio.create_task(self._event_loop_wakeup()))
             
-            # USB paddle poll loop
+            # USB paddle poll loop (works without TCI)
             if self.usb_paddle_handler:
                 tasks.append(asyncio.create_task(self.usb_paddle_handler.poll_loop()))
             
             # Wait for all tasks (or until interrupted)
-            await asyncio.gather(*tasks, return_exceptions=True)
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            else:
+                # No tasks (disconnected mode) - wait indefinitely until shutdown
+                self.logger.info("Running in disconnected mode - waiting for shutdown")
+                try:
+                    while self.running:
+                        await asyncio.sleep(1)
+                except asyncio.CancelledError:
+                    pass
             
         except asyncio.CancelledError:
             self.logger.info("Application cancelled")
