@@ -1,515 +1,176 @@
 # TCI CW Controller
 
-Python application for controlling SunSDR radios via TCI (Transceiver Command Interface) protocol with support for:
-
-- **F1-F12 keyboard macros** - Send predefined CW text messages
-- **USB paddle input** - Manual CW keying via XIAO SAMD21 microcontroller
-- **Local sidetone** - Instant audio feedback for paddle operation (<20ms latency)
-- **Configurable** - YAML-based configuration for callsign, messages, and settings
-
-**Status:** 🚧 In development - Features and structure subject to change
-
-![main gui](images/GUI_1.png)
+CW keyer application for SunSDR radios via TCI (Transceiver Command Interface) protocol.
 
 ## Features
 
-### F-Key CW Macros
-- Press F1-F12 to send pre-configured CW messages
-- Automatic callsign substitution using `{callsign}` placeholder
-- Text-to-morse conversion handled by ExpertSDR3/TCI
+✅ **Graphical User Interface** - Tkinter-based GUI for easy operation  
+✅ **F1-F12 Keyboard Macros** - Send predefined CW messages (click or press F-keys)  
+✅ **USB Paddle Support** - Manual CW keying via XIAO SAMD21 microcontroller  
+✅ **Local Sidetone** - Instant audio feedback  
+✅ **Vail Adapter Support** - Hardware-based iambic keyer with 9 keyer modes  
+✅ **Live Configuration** - Edit macros and settings without restarting  
 
-### USB Paddle Manual Keying
-- Connect CW paddle via XIAO SAMD21 USB HID interface
-- Accurate timing measurement
-- Local sidetone for instant feedback (no network latency)
-- Straight key mode (paddle states sent to TCI)
-- Optional iambic keyer support
+![main gui](images/GUI_1.png)
 
-### TCI Protocol
-- WebSocket connection to ExpertSDR3 TCI server
-- Configurable host and port
-- Auto-reconnection on disconnect
-- Supports multiple transceivers (Not tested)
+**Modes:**
+- **GUI Mode** (recommended) - Visual interface with status indicators and macro editor
+- **CLI Mode** - Lightweight terminal-only operation
 
-## Known Limitations
+## Quick Start
 
-**Wayland display server** might have limitations of triggering the keying events.
-
-### TX Spectrum Display (KEYER command)
-
-When using manual paddle keying via the TCI `KEYER` command, the **TX spectrum in ExpertSDR3 may not show the CW carrier**, even though the CW signal is actually being transmitted.
-
-**Observed behavior:**
-- Radio goes to TX mode (TX indicator lit)
-- TX spectrum display shows no carrier/signal
-
-**Why this happens:**
-- `cw_macros`: Uses ExpertSDR3's internal CW generator → carrier appears in TX spectrum
-- `KEYER`: External key state notification → carrier may be injected at a later stage in the TX chain(?), bypassing the spectrum visualization point
-
-**Status:** This is a display issue in ExpertSDR3, not a functional problem. The CW is transmitted correctly. May be raised with Expert Electronics support.
-
-## ToDo / Feature Wishlist
-
-- [ ] **Send as you write**: Option to transmit CW in real-time as you type, not just via macros or paddle.
-- [ ] **Quick "Repeat last sent" button**: Instantly resend the last transmitted message.
-- [ ] **Graphical User Interface (GUI)**: User-friendly interface for configuration, macro editing, and live status.
-- [ ] **Windows support**: Port application for Windows, including USB HID and audio compatibility.
-- [ ] Speed control.
-- [ ] PTT hold timer.
-- [ ] Macro editor: Edit F-key macros from the GUI without editing YAML.
-- [ ] Contest mode: Add QSO numbering, serials, and contest logging features.
-- [ ] Network paddle: Support remote paddle input via UDP or TCP.
-- [ ] Hamlib/CAT fallback: Alternative to TCI for radios without TCI support.
-- [ ] Advanced error handling: More robust reconnect and diagnostics.
-- [ ] Customizable sidetone: Per-operator sidetone profiles and advanced audio settings.
-
-
-## Hardware Requirements
-
-### USB Paddle Input (Optional)
-- **Seeed XIAO SAMD21** microcontroller (~$5-8 USD)
-- CW paddle (iambic or straight key)
-- USB-C cable
-
-**Paddle connections:**
-- D2 (PA08) → Dit paddle
-- D1 (PA04) → Dah paddle
-- GND → Common ground
-
-### Firmware Options
-
-You can choose between two firmware options for the XIAO SAMD21:
-
-#### **Option 1: Custom Firmware (Default)**
-- Simple HID keyboard output (Left/Right Ctrl keys)
-- Python handles iambic keyer logic
-- Single keyer mode (Iambic A/B)
-- Configuration via config.yaml
-- See [USB_HID README](https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID/README.md) for wiring and firmware
-
-#### **Option 2: Vail Adapter Firmware (Experimental)**
-- **Status:** Experimental ⚠️
-- Hardware-based keyer logic (9 modes: straight, bug, iambic A/B, ultimatic, etc.)
-- MIDI control for speed/mode configuration
-- Settings stored in EEPROM (persist across reboots)
-- Hardware sidetone via piezo buzzer
-- Requires `vail_adapter.enabled: true` in config.yaml
-- See [VAIL_ADAPTER_INTEGRATION.md](VAIL_ADAPTER_INTEGRATION.md) for setup
-- Firmware: [Vail Adapter v4.4](https://github.com/Vail-CW/vail-adapter/releases)
-- **Note:** Works with basic PCB v2 (`xiao_basic_pcb_v2.uf2`) or non-PCB variant
-
-**Recommendation:** Start with **Option 1 (custom firmware)** for proven stability. Try Option 2 if you want hardware keyer features or plan to use with Vail web repeater.
-See this - https://vailadapter.com/
-
-
-## Software Requirements
-
-- Python 3.8 or higher
-- Linux (Ubuntu, or similar) - for USB HID support
-- ExpertSDR3 with TCI protocol enabled
-- Windows should work, NOT tested yet.
-
-## Installation
-
-### 1. Install Dependencies
-
+### 1. Install
 ```bash
-# Install Python packages
 pip install -r requirements.txt
 ```
 
-**Dependencies:**
-- `websockets` - TCI WebSocket client
-- `pynput` - Keyboard input for F-keys
-- `pyaudio` - Local sidetone audio
-- `PyYAML` - Configuration file parsing
-- `mido`, `python-rtmidi` - MIDI control for Vail firmware (optional)
-
-**Optional: Vail Adapter Library** (for Vail firmware MIDI configuration)
-
-If using Vail adapter firmware (Option 2), uncomment in `requirements.txt` and install:
-
-```bash
-# Uncomment this line in requirements.txt:
-# git+https://github.com/tompatulpan/vail-adapter-lib.git
-
-# Then install:
-pip install -r requirements.txt
-```
-
-**Note:** The library is only needed for initial MIDI configuration of Vail firmware. Once configured, settings persist in EEPROM.
-
-### 2. Flash XIAO Firmware (USB Paddle Only)
-
-If using USB keyer input:
-
-1. Install Arduino IDE 2.x
-2. Add Seeeduino SAMD boards:
-   - Tools → Board Manager → Search "Seeed SAMD Boards"
-   - Install "Seeed SAMD Boards"
-3. Select board: Tools → Board → Seeed SAMD → "Seeed XIAO M0"
-4. Open firmware: `https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID/xiao_samd21_hid_key`
-5. Click Upload
-6. Verify: `lsusb -d 2886:802f` should show "Seeed XIAO SAMD21"
-
-### 3. Setup USB Permissions (USB Paddle Only)
-
-```bash
-# Run installer script (works for Fedora & Ubuntu)
-./install_udev.sh
-
-# Verify device access
-ls -l /dev/hidraw*
-# Should show mode 0666 or owned by your user
-```
-
-Manual setup:
-```bash
-# Create udev rule
-echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="2886", ATTRS{idProduct}=="802f", MODE="0666", TAG+="uaccess"' | \
-  sudo tee /etc/udev/rules.d/99-xiao-samd21.rules
-
-# Reload rules
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-
-# Replug USB device
-```
-
-### 4. Configure TCI Controller
-
-Edit [config.yaml](config.yaml):
-
+### 2. Configure
+Edit `config.yaml`:
 ```yaml
-# Radio connection
-tci:
-  host: "localhost"      # TCI server IP
-  port: 40001            # TCI port (check ExpertSDR3 TCI server settings)
-  
-# Operator info
 operator:
-  callsign: "W1AW"       # Your callsign
+  callsign: "SM0ONR"      # Your callsign
 
-# CW settings
-cw:
-  speed_wpm: 25          # CW speed
+tci:
+  host: "localhost"     # TCI server (check ExpertSDR3 settings)
+  port: 40001
 
-# Sidetone (for USB paddle)
-sidetone:
-  enabled: true
-  frequency: 600         # Hz
-  volume: 0.5            # 0.0-1.0
-
-# Function key macros
 function_keys:
-  F1: "CQ CQ CQ DE {callsign} {callsign} K"
+  F1: "CQ CQ CQ DE {callsign} K"
   F2: "DE {callsign} K"
-  F3: "{callsign} 599"
-  # ... etc
+  # ...customize your macros
 ```
 
-## Usage
-
-### Start the Controller
-
+### 3. Run
 ```bash
+# GUI mode (recommended)
+python3 main.py --gui
+
+# CLI mode
 python3 main.py
 ```
 
-Expected output:
+**Detailed guides:**
+- [QUICKSTART.md](QUICKSTART.md) - Full installation steps
+- [GUI_USAGE.md](GUI_USAGE.md) - GUI features and usage
+- [VAIL_ADAPTER_INTEGRATION.md](VAIL_ADAPTER_INTEGRATION.md) - Vail firmware setup
+
+## USB Paddle Setup (Optional)
+
+### Hardware
+- **XIAO SAMD21** microcontroller (~$5-8 USD)
+- CW paddle (iambic or straight key)
+- Connections: D2 → Dit, D1 → Dah, GND → Common
+
+### Choose Firmware
+
+#### **Vail Adapter Firmware**
+- 9 hardware keyer modes (straight, bug, iambic A/B, ultimatic, etc.)
+- MIDI configuration for speed/mode
+- Settings stored in EEPROM
+- Hardware sidetone via piezo buzzer
+- **Install:** See [VAIL_ADAPTER_INTEGRATION.md](VAIL_ADAPTER_INTEGRATION.md)
+- **Download:** [Vail Adapter v4.4](https://github.com/Vail-CW/vail-adapter/releases)
+- **Enable:** Set `vail_adapter.enabled: true` in config.yaml
+
+**Note** 
+This version works - xiao_basic_pcb_v2.uf2
+
+#### **Simple Firmware**
+- Outputs Left/Right Ctrl keys for dit/dah
+- Python handles keyer logic (iambic A/B)
+- Single configuration via `config.yaml`
+- **Install:** See [USB_HID README](https://github.com/tompatulpan/duration-encoded-cw-protocol/tree/main/USB_HID)
+
+
+### USB Permissions
+```bash
+./install_udev.sh  # Works on Fedora & Ubuntu
+# Then replug USB device
 ```
-15:23:45 [INFO] TCICWController: Connecting to TCI server localhost:40001
-15:23:45 [INFO] TCIClient: Connected to TCI server
-15:23:46 [INFO] TCIClient: TCI server is READY
-15:23:46 [INFO] KeyboardHandler: Starting F-key listener (F1-F12 for CW macros)
-15:23:46 [INFO] USBPaddleHandler: USB paddle connected
-15:23:46 [INFO] TCICWController: Initializing sidetone: 600 Hz
 
-============================================================
-TCI CW CONTROLLER READY
-============================================================
-F1-F12: Send CW macros
-USB Paddle: Manual keying
-Ctrl+C: Quit
-============================================================
-```
+## Configuration
 
-### Send CW Macros
-
-Press function keys:
-- **F1** - CQ message
-- **F2** - Short reply
-- **F3** - Signal report
-- (etc., as configured)
-
-The configured message will be sent to TCI with `{callsign}` substituted.
-
-### Manual Paddle Keying
-
-If USB paddle is connected:
-- Press dit/dah paddles
-- Local sidetone provides instant feedback (if enabled)
-- Application enables TX via TCI, then sends KEYER commands
-- Iambic timing generated locally with configurable speed
-
-**TX Settle Time:**
-When you touch the paddle, the application sends `TRX:true` to enable TX, then waits
-`tx_settle_time` (default 10-100ms) before sending the first KEYER command. This allows
-ExpertSDR3 to fully switch to TX mode. Without this delay, the first dit/dah may be
-clipped or lost.
+Key settings in `config.yaml`:
 
 ```yaml
-cw:
-  tx_settle_time: 0.050  # 50ms - adjust if first elements are clipped
-```
+# Operator
+operator:
+  callsign: "SM0ONR"
 
-**Sidetone:** Local sidetone starts with the first KEYER command (after TX settle time),
-so audio is synchronized with actual transmission.
-
-### Stop the Controller
-
-Press **Ctrl+C** for graceful shutdown.
-
-## Configuration Reference
-
-### TCI Settings
-
-```yaml
+# TCI connection
 tci:
-  host: "localhost"        # TCI server hostname/IP
-  port: 40001              # TCI server port
-  trx_number: 0            # Transceiver number (usually 0)
-  auto_reconnect: true     # Reconnect on disconnect
-  reconnect_delay: 3.0     # Seconds between reconnect attempts
-```
+  host: "localhost"
+  port: 40001           # Check ExpertSDR3 settings
 
-**Finding TCI Port:**
-- Check ExpertSDR3 settings/documentation
-- Common ports: 40001, 50001
-- Try: `netstat -an | grep LISTEN` to see open ports
-
-### CW Settings
-
-```yaml
+# CW settings
 cw:
-  default_mode: "CW"       # CW, CWL, or CWU
-  speed_wpm: 25            # Words per minute (for USB paddle keying only)
-  keyer_mode: "iambic-b"   # straight, iambic-a, iambic-b
-  tx_settle_time: 0.050    # Seconds to wait after TX enable before keying
-```
+  speed_wpm: 25         # For USB paddle (macros use ExpertSDR3 speed)
+  keyer_mode: "iambic_b"
+  tx_settle_time: 0.050 # Wait time before keying (10-150ms)
 
-**TX Settle Time (`tx_settle_time`):**
-- Time in seconds to wait after enabling TX before first KEYER command
-- Required because ExpertSDR3 needs time to switch RX→TX
-- Too low = first dit/dah clipped or lost
-- Too high = noticeable delay when starting to key
-- Typical values: 0.10-0.150 (10-150ms)
-- Start with 0.050 and reduce if latency bothers you
+# Sidetone
+sidetone:
+  enabled: true
+  frequency: 600
+  volume: 0.5
 
-**Important: CW Speed Configuration**
-- **F-key macros:** Speed controlled by **ExpertSDR3's internal CW speed setting**
-  - Change in: ExpertSDR3 → Break.in → Macros speed
-  - The `speed_wpm` value in config.yaml does **not** affect F-key macro speed
-- **USB paddle keying:** Speed controlled by `speed_wpm` in config.yaml
-  - This sets the timing for iambic keyer element generation
-  - Match this to ExpertSDR3's speed for consistent timing between macros and paddle
-
-**Keyer Mode:**
-- `straight` - Send raw paddle states to TCI
-- `iambic-a` - Client-side iambic Mode A (Not tested yet)
-- `iambic-b` - Client-side iambic Mode B with paddle memory
-
-### USB HID Settings
-
-```yaml
+# USB paddle
 usb_hid:
-  enabled: true            # Enable USB paddle
-  device_path: null        # Auto-detect, or specify: /dev/hidraw0
-  vendor_id: "2886"        # XIAO SAMD21 VID
-  product_id: "802f"       # XIAO SAMD21 PID
-  debug: false             # Enable HID debug output
+  enabled: true
+  device_path: null     # Auto-detect
+
+# Vail adapter (if using Vail firmware)
+vail_adapter:
+  enabled: false        # Set true for Vail firmware
+  keyer_mode: "iambic_b"
+  speed_wpm: 25
 ```
 
-### Function Key Macros
-
-```yaml
-function_keys:
-  F1: "CQ CQ CQ DE {callsign} {callsign} K"
-  F2: "DE {callsign} K"
-  F3: "{callsign} 599"
-  F4: "TU 73 DE {callsign}"
-  F5: "QRZ? DE {callsign} K"
-  F6: "PSE QRS"
-  F7: "QRL?"
-  F8: "TEST DE {callsign}"
-  F9: ""  # Not assigned
-```
-
-**Reserved Characters** (automatically escaped):
-- `:` becomes `^`
-- `,` becomes `~`
-- `;` becomes `*`
+**Important Notes:**
+- **F-key macro speed:** Controlled by ExpertSDR3's internal CW settings (Break-in → Macros speed)
+- **USB paddle speed:** Controlled by `cw.speed_wpm` in config.yaml
+- **TX settle time:** Wait period after enabling TX before sending first element (prevents clipping)
 
 ## Troubleshooting
 
 ### TCI Connection Failed
-
-```
-[ERROR] TCIClient: Connection timeout after 5s
-```
-
 **Solutions:**
-1. Check ExpertSDR3 is running
-2. Verify TCI is enabled in ExpertSDR3 settings
-3. Check port number in config.yaml
-4. Try: `telnet localhost 40001` to test connection
-5. Check firewall settings
+- Check ExpertSDR3 is running with TCI enabled
+- Verify port in config.yaml matches TCI settings
+- Test: `telnet localhost 40001`
 
 ### USB Paddle Not Found
-
-```
-[WARNING] USB paddle not found - manual keying disabled
-```
-
 **Solutions:**
-1. Check XIAO is connected: `lsusb -d 2886:802f`
-2. Check firmware is flashed (LED should blink on startup)
-3. Run udev installer: `./install_udev.sh`
-4. Check permissions: `ls -l /dev/hidraw*`
-5. Try manual device path in config: `device_path: /dev/hidraw0`
+- Check connection: `lsusb -d 2886:802f`
+- Run: `./install_udev.sh` and replug device
+- Try specifying device: `device_path: /dev/hidraw0` in config.yaml
 
 ### Sidetone Failed
-
-```
-[WARNING] Failed to initialize sidetone: [Errno -9996] Invalid output device
-```
-
 **Solutions:**
-1. Check audio output device: `aplay -l`
-2. Install PyAudio: `pip install pyaudio`
-3. Install portaudio: `sudo dnf install portaudio` (Fedora) or `sudo apt install portaudio19-dev` (Ubuntu)
-4. Disable sidetone in config if not needed
+- Install portaudio: `sudo dnf install portaudio` (Fedora) or `sudo apt install portaudio19-dev` (Ubuntu)
+- Reinstall: `pip install --force-reinstall pyaudio`
 
-### Permission Denied
-
-```
-[ERROR] Error: Permission denied accessing /dev/hidraw0
-```
-
+### GUI Won't Start
 **Solutions:**
-1. Run udev installer: `./install_udev.sh`
-2. Replug USB device after installing rules
-3. Check user is in correct group: `groups`
-4. Temporary fix: `sudo python3 main.py` (not recommended)
+- Check tkinter: `python3 -m tkinter`
+- Install if missing: `sudo dnf install python3-tkinter` (Fedora) or `sudo apt install python3-tk` (Ubuntu)
 
-## Architecture
+See [TESTING.md](TESTING.md) for component testing procedures.
 
-```
-┌────────────────────────────────────────────────────┐
-│                    main.py                         │
-│              (TCI CW Controller)                   │
-│                                                    │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────┐  │
-│  │ TCI Client  │  │  F-Key       │  │ USB       │  │
-│  │ (WebSocket) │  │  Handler     │  │ Paddle    │  │
-│  └──────┬──────┘  └──────┬───────┘  └─────┬─────┘  │
-│         │                │                 │       │
-└─────────┼────────────────┼─────────────────┼───────┘
-          │                │                 │
-          ↓                ↓                 ↓
-    ExpertSDR3       Keyboard          XIAO SAMD21
-    TCI Server       (pynput)          USB HID
-          │                                  │
-          │                                  ↓
-          │                           ┌─────────────┐
-          │                           │  Sidetone   │
-          │                           │  Generator  │
-          └───────────────────────────┤  (PyAudio)  │
-                                      └─────────────┘
-```
+## Known Issues
 
-## Files
+### TX Spectrum Display
+When using manual paddle keying via `KEYER` command, ExpertSDR3 TX spectrum may not show the CW carrier, though the signal transmits correctly. This is a display issue in ExpertSDR3.
 
-- `main.py` - Main application entry point
-- `config.yaml` - Configuration file
-- `tci_client.py` - TCI WebSocket protocol client
-- `keyboard_handler.py` - F-key macro handler
-- `usb_paddle_handler.py` - USB paddle input with timing
-- `sidetone_generator.py` - Local audio sidetone
-- `xiao_hid_reader.py` - USB HID device reader
-- `install_udev.sh` - udev rules installer
-- `requirements.txt` - Python dependencies
+### Wayland Display Server
+F-key triggering may have limitations on some Wayland systems. Use X11 session if you encounter issues.
+
+## Credits
+
+- Vail-CW adapter project: https://github.com/Vail-CW
+- TCI protocol: ExpertSDR3 - https://github.com/ExpertSDR3/TCI
 
 ## License
 
 MIT License
-
-## Credits
-
-- Implementation inspired by the Vail-CW adapter project - https://github.com/Vail-CW
-- TCI protocol specification from ExpertSDR3 - https://github.com/ExpertSDR3/TCI
-
-## Support
-
-For issues:
-1. Check troubleshooting section above
-2. Verify hardware connections
-3. Test components independently
-4. Check logs for error messages
-
-## Development
-
-### Testing Individual Components
-
-**Test USB HID reader:**
-```bash
-python3 -c "
-from xiao_hid_reader import XiaoHIDReader
-import time
-r = XiaoHIDReader(debug=True)
-if r.connect():
-    print('Press paddles (Ctrl+C to quit)...')
-    while True:
-        dit, dah = r.read_paddles()
-        if dit or dah:
-            print(f'Dit={dit}, Dah={dah}')
-        time.sleep(0.01)
-"
-```
-
-**Test sidetone:**
-```bash
-python3 -c "
-from sidetone_generator import SidetoneGenerator
-import time
-s = SidetoneGenerator(frequency=600)
-print('Testing sidetone (5 seconds)...')
-s.set_key(True)
-time.sleep(5)
-s.set_key(False)
-s.close()
-print('Done')
-"
-```
-
-**Test TCI connection:**
-```bash
-python3 -c "
-import asyncio
-from tci_client import TCIClient
-
-async def test():
-    client = TCIClient('localhost', 40001)
-    if await client.connect():
-        print('Connected!')
-        await client.send_cw_macros('TEST DE W1AW')
-        await asyncio.sleep(2)
-        await client.disconnect()
-    else:
-        print('Connection failed')
-
-asyncio.run(test())
-"
-```
 
