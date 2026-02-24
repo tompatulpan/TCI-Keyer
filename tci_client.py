@@ -146,9 +146,28 @@ class TCIClient:
         while self.running and self.websocket:
             try:
                 message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
-                # Handle both bytes and string from websocket
+                
+                # Check if this is a binary frame (IQ/audio stream)
                 if isinstance(message, bytes):
-                    message = message.decode('utf-8')
+                    # Binary frames are typically 64+ bytes (StreamHeader + data)
+                    # Text commands are usually < 100 bytes and ASCII
+                    if len(message) >= 64:
+                        # This is a binary stream packet (IQ_STREAM, RX_AUDIO_STREAM, etc.)
+                        # Skip it - we don't need audio/IQ data for CW control
+                        self.logger.debug(f"Skipping binary stream packet ({len(message)} bytes)")
+                        continue
+                    else:
+                        # Short binary message - try to decode as text
+                        try:
+                            message = message.decode('utf-8')
+                        except UnicodeDecodeError:
+                            self.logger.warning(f"Received non-UTF8 binary data ({len(message)} bytes), skipping")
+                            continue
+                
+                # Process text command
+                if not message:
+                    continue
+                    
                 self.logger.debug(f"RX: {message.strip()}")
                 
                 if self.on_message:

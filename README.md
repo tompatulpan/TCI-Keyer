@@ -19,12 +19,29 @@ CW keyer application for SunSDR radios via TCI (Transceiver Command Interface) p
 
 ## Quick Start
 
-### 1. Install
+### Option 1: Use Pre-built Binary (Easiest)
+
+Download pre-built executables from [releases](https://github.com/tompatulpan/TCI-Keyer/tree/main/dist):
+- **Linux**: `tci-cw-controller` (no Python installation required)
+- **Windows**: `tci-cw-controller.exe` (coming soon)
+
+Extract and run:
+```bash
+# Linux
+chmod +x tci-cw-controller
+./tci-cw-controller --gui
+```
+
+Then edit `config.yaml` or direct in GUI (and save to config.yaml) to set your callsign and customize macros.
+
+### Option 2: Run from Source
+
+#### 1. Install
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure
+##### 2. Configure
 Edit `config.yaml`:
 ```yaml
 operator:
@@ -40,7 +57,7 @@ function_keys:
   # ...customize your macros
 ```
 
-### 3. Run
+#### 3. Run
 ```bash
 # GUI mode (recommended)
 python3 main.py --gui
