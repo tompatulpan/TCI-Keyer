@@ -70,6 +70,7 @@ class TCICWController:
         # Macro state tracking (for GUI LED)
         self.macro_active = False
         self.macro_release_task = None
+        self.macro_safety_tx_release_task = None  # Fallback: release TX if macro doesn't finish
         
         # Vail firmware event buffering (50ms delay to allow TX settle)
         self.vail_event_buffer = []
@@ -422,6 +423,22 @@ class TCICWController:
         # Track mode changes (for band change detection)
         if message.upper().startswith('MODULATION:'):
             self.tci_client.parse_modulation_from_message(message)
+
+        # When server confirms TX is off, clean up macro state
+        if message.upper().startswith('TRX:'):
+            try:
+                args = message.split(':', 1)[1].rstrip(';').split(',')
+                if len(args) >= 2 and int(args[0]) == self.tci_client.trx_number:
+                    if args[1].lower() == 'false':
+                        # Cancel safety timer (if still pending)
+                        if self.macro_safety_tx_release_task:
+                            self.macro_safety_tx_release_task.cancel()
+                            self.macro_safety_tx_release_task = None
+                        # Always clear the LED — the task may have been cancelled
+                        # before it could set macro_active=False itself
+                        self.macro_active = False
+            except (ValueError, IndexError):
+                pass
         
         # Log interesting messages
         if message.startswith(('VFO:', 'MODULATION:', 'TRX:', 'drive:')):
@@ -446,30 +463,46 @@ class TCICWController:
             self.logger.info("✓ PTT Permission: DISABLED")
             print("\n[PTT] Permission DISABLED - TX blocked\n")
             
-            # If PTT is currently active, turn it off
+            # Release TX for any active source (paddle keying or macro)
             if self.paddle_ptt_active:
                 await self.tci_client.set_ptt(False)
                 self.paddle_ptt_active = False
-                self.logger.debug("PTT released due to permission disable")
+                self.logger.debug("Paddle PTT released due to permission disable")
+
+            if self.macro_active:
+                # Abort in-flight macro: cancel timer, release TX, clear LED
+                if self.macro_safety_tx_release_task:
+                    self.macro_safety_tx_release_task.cancel()
+                    self.macro_safety_tx_release_task = None
+                if self.macro_release_task:
+                    self.macro_release_task.cancel()
+                    self.macro_release_task = None
+                await self.tci_client.set_trx(False)
+                await self.tci_client.stop_cw_macros()
+                self.macro_active = False
+                self.logger.info("CW macro aborted due to PTT permission disable")
     
-    async def _on_macro_send(self, key_name: str, message: str):
+    async def _on_macro_send(self, key_name: str, message: str) -> 'Optional[str]':
         """
         Callback when F-key macro is pressed (called from pynput thread via run_coroutine_threadsafe)
         
         Args:
             key_name: Function key name (F1-F12)
             message: CW message to send
+
+        Returns:
+            None on success; a short human-readable reason string if blocked.
         """
         if not self.tci_client or not self.tci_client.ready:
             self.logger.warning(f"Cannot send {key_name}: TCI not ready")
-            return
+            return "TCI not ready"
         
         # Check PTT permission
         if not self.manual_ptt_active:
             ptt_key = self.config.get('keyboard', {}).get('ptt_toggle_key', 'scroll_lock')
             self.logger.warning(f"Macro blocked: PTT permission is OFF (press {ptt_key.upper()} or GUI button to enable)")
             print(f"\n[BLOCKED] {key_name} - PTT permission disabled\n")
-            return
+            return "PTT OFF"
         
         self.logger.info(f"Sending CW macro: {message}")
         
@@ -480,29 +513,66 @@ class TCICWController:
         if self.macro_release_task:
             self.macro_release_task.cancel()
             self.macro_release_task = None
+        if self.macro_safety_tx_release_task:
+            self.macro_safety_tx_release_task.cancel()
+            self.macro_safety_tx_release_task = None
         
         try:
             force_ptt = self.config['tci'].get('force_ptt', False)
-            await self.tci_client.send_cw_macros(message, force_ptt=force_ptt)
-            
-            # Schedule macro_active to turn off after 500ms
+            sent = await self.tci_client.send_cw_macros(message, force_ptt=force_ptt)
+
+            if not sent:
+                # Macro was blocked (wrong mode, receive-only, etc.) — nothing to clean up
+                self.macro_active = False
+                mode = self.tci_client.current_mode or "unknown"
+                return f"Wrong mode ({mode})"
+
+            # Schedule GUI LED clear after 500ms (no force_ptt — radio manages TX itself)
             async def clear_macro_flag():
                 await asyncio.sleep(0.5)
                 self.macro_active = False
-            
             self.macro_release_task = asyncio.create_task(clear_macro_flag())
+
+            # When force_ptt is used, Python controls TX lifecycle explicitly.
+            # ExpertSDR3 does NOT auto-release TX after cw_macros, so we must.
+            # Schedule TRX:false after estimated transmission time + 500ms overhead.
+            if force_ptt:
+                wpm = self.config.get('cw', {}).get('speed_wpm', 25)
+                # 12000ms / WPM per character  (PARIS standard: 10 units avg per char,
+                # 1 unit = 1200ms/WPM  →  10 * 1200/WPM = 12000/WPM ms per char)
+                msg_resolved = message.replace('{callsign}', self.config['operator']['callsign'])
+                estimated_ms = int(len(msg_resolved) * 12000 / wpm) + 500
+                estimated_ms = min(estimated_ms, 120_000)  # cap at 2 minutes
+
+                # Cancel the 500ms LED clear — TX release will handle it instead
+                if self.macro_release_task:
+                    self.macro_release_task.cancel()
+                    self.macro_release_task = None
+
+                async def macro_tx_release():
+                    await asyncio.sleep(estimated_ms / 1000.0)
+                    if self.tci_client and self.tci_client.ready:
+                        self.logger.debug(
+                            f"Releasing TX after macro (estimated {estimated_ms}ms)"
+                        )
+                        await self.tci_client.set_trx(False)
+                    self.macro_active = False
+                    self.macro_safety_tx_release_task = None
+
+                self.macro_safety_tx_release_task = asyncio.create_task(macro_tx_release())
         except Exception as e:
             self.logger.error(f"Error sending CW macro: {e}")
             self.macro_active = False
+            return f"Error: {e}"
     
-    async def send_macro(self, message: str):
+    async def send_macro(self, message: str) -> 'Optional[str]':
         """
-        Send CW macro (for GUI button clicks)
-        
-        Args:
-            message: CW message to send (with callsign already substituted)
+        Send CW macro (for GUI button clicks).
+
+        Returns:
+            None on success; a short human-readable reason string if blocked.
         """
-        await self._on_macro_send("GUI", message)
+        return await self._on_macro_send("GUI", message)
     
     async def update_cw_speed(self, wpm: int):
         """
@@ -661,6 +731,18 @@ class TCICWController:
         Note: For Vail firmware mode, events are buffered 50ms to allow TX settle.
         Note: Sidetone is handled in usb_paddle_handler for minimal latency.
         """
+        # Block ALL keying events when PTT permission is off — prevents spurious
+        # KEYER commands reaching ExpertSDR3 without TRX:true, which can cause
+        # it to ignore the next cw_macros command.
+        if not self.manual_ptt_active:
+            if key_down:  # Log only on key-down to avoid warning spam on key-up
+                ptt_key = self.config.get('keyboard', {}).get('ptt_toggle_key', 'scroll_lock')
+                self.logger.warning(
+                    f"Paddle keying blocked: PTT permission is OFF "
+                    f"(press {ptt_key.upper()} or GUI button to enable)"
+                )
+            return
+
         # Send to TCI
         if self.tci_client and self.tci_client.ready:
             # For Vail firmware: buffer events with 50ms delay for TX settle

@@ -3,7 +3,7 @@
 Version information for TCI CW Controller
 """
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 __build_date__ = "2026-03-24"
 __author__ = "SM0ONR"
 __description__ = "TCI CW Controller - Morse code keyer for ExpertSDR3"

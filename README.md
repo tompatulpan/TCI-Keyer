@@ -36,7 +36,7 @@ Then edit `config.yaml` or direct in GUI (and save to config.yaml) to set your c
 
 ### Option 2: Run from Source
 
-#### 1. Install
+#### 1. Install (vertual anv)
 ```bash
 pip install -r requirements.txt
 ```
