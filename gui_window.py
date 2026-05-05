@@ -133,16 +133,29 @@ class TkinterGUI:
         ttk.Label(frame, textvariable=self.usb_device_var,
                  font=('TkDefaultFont', 9)).grid(row=0, column=6, sticky=tk.W, padx=5)
         
-        # Active macro LED indicator (no label, just LED)
-        self.active_macro_indicator = tk.Label(frame, text="●", fg="gray", 
+        # Radio mode (CW / DIGU / USB etc.)
+        ttk.Label(frame, text="Mode:").grid(row=0, column=7, sticky=tk.W, padx=(15, 5))
+        self.mode_var = tk.StringVar(value="?")
+        self.mode_indicator = tk.Label(frame, textvariable=self.mode_var,
+                                       bg="gray", fg="white", width=6, relief=tk.SUNKEN)
+        self.mode_indicator.grid(row=0, column=8, padx=5)
+
+        # Active macro / paddle TX LED
+        self.active_macro_indicator = tk.Label(frame, text="●", fg="gray",
                                                font=('Arial', 16), width=1)
-        self.active_macro_indicator.grid(row=0, column=7, sticky=tk.W, padx=(15, 5))
-        
+        self.active_macro_indicator.grid(row=0, column=9, sticky=tk.W, padx=(15, 5))
+
+        # Internal state for blocked-LED guard and popup
+        self._macro_block_clear_id = None   # after() handle for LED reset timer
+        self._macro_blocked_active = False  # True while red-LED / popup visible
+        self._block_popup = None            # auto-dismiss Toplevel
+        self._block_popup_after = None
+
         # PTT Permission button
         self.ptt_button = tk.Button(frame, text="PTT: BLOCKED", bg="red", fg="white",
                                     font=('TkDefaultFont', 9, 'bold'), width=12,
                                     command=self._toggle_ptt)
-        self.ptt_button.grid(row=0, column=8, padx=(15, 5))
+        self.ptt_button.grid(row=0, column=10, padx=(15, 5))
         
     def _create_macros_frame(self, parent):
         """Compact F-key macro buttons"""
@@ -355,7 +368,7 @@ class TkinterGUI:
         callsign = self.config['operator']['callsign']
         message = text.replace('{callsign}', callsign)
         
-        # Update active macro indicator (LED to bright green)
+        # Optimistically show green LED while the async call is in-flight
         self.active_macro_indicator.config(fg="#00ff00")
         
         # Send via controller (async)
@@ -364,11 +377,85 @@ class TkinterGUI:
             self.loop
         )
         
-        # Clear indicator after send (LED back to gray)
-        self.root.after(500, lambda: self.active_macro_indicator.config(fg="gray"))
+        def _on_send_done(fut):
+            """Called from asyncio thread — schedule UI update back on Tkinter thread."""
+            try:
+                reason = fut.result()  # None = success, str = block reason
+            except Exception as e:
+                reason = str(e)
+            self.root.after(0, lambda: self._update_macro_led(reason))
+
+        future.add_done_callback(_on_send_done)
         
         logger.info(f"[GUI] {fkey} clicked: {message}")
-        
+
+    def _update_macro_led(self, reason: str):
+        """Update macro LED and show popup if blocked. Must be called on Tkinter thread."""
+        if self._macro_block_clear_id:
+            self.root.after_cancel(self._macro_block_clear_id)
+            self._macro_block_clear_id = None
+
+        if reason is None:
+            # Success — LED should already be green; clear after 500ms
+            self._macro_blocked_active = False
+            self.active_macro_indicator.config(fg="#00ff00")
+            self._macro_block_clear_id = self.root.after(500, self._clear_macro_led)
+        else:
+            # Blocked — flash red for 3 s and show popup
+            self._macro_blocked_active = True
+            self.active_macro_indicator.config(fg="red")
+            self._show_macro_blocked_popup(reason)
+            self._macro_block_clear_id = self.root.after(3000, self._clear_macro_led)
+
+    def _clear_macro_led(self):
+        """Reset LED to idle state (called by after() timer)."""
+        self.active_macro_indicator.config(fg="gray")
+        self._macro_blocked_active = False
+        self._macro_block_clear_id = None
+
+    def _show_macro_blocked_popup(self, reason: str):
+        """Small borderless popup that auto-dismisses after 3 seconds."""
+        # Dismiss any still-visible popup first
+        if self._block_popup:
+            try:
+                self._block_popup.destroy()
+            except Exception:
+                pass
+            self._block_popup = None
+        if self._block_popup_after:
+            self.root.after_cancel(self._block_popup_after)
+            self._block_popup_after = None
+
+        popup = tk.Toplevel(self.root)
+        popup.overrideredirect(True)   # no title bar
+        popup.attributes('-topmost', True)
+
+        # Centre over main window
+        self.root.update_idletasks()
+        mx = self.root.winfo_x() + self.root.winfo_width() // 2
+        my = self.root.winfo_y() + self.root.winfo_height() // 2
+        popup.geometry(f"+{mx - 120}+{my - 35}")
+
+        outer = tk.Frame(popup, bg="#cc3300", bd=2, relief=tk.RAISED)
+        outer.pack(fill=tk.BOTH, expand=True)
+        tk.Label(outer, text=f"\u26a0  Macro blocked\n{reason}",
+                 fg="white", bg="#cc3300",
+                 font=('TkDefaultFont', 10, 'bold'),
+                 padx=20, pady=10).pack()
+
+        self._block_popup = popup
+
+        def _dismiss():
+            if self._block_popup:
+                try:
+                    self._block_popup.destroy()
+                except Exception:
+                    pass
+                self._block_popup = None
+            self._block_popup_after = None
+
+        self._block_popup_after = self.root.after(3000, _dismiss)
+
     def _on_speed_change(self, value):
         """CW speed slider changed - with throttling"""
         wpm = int(float(value))
@@ -614,15 +701,25 @@ class TkinterGUI:
                 self.usb_indicator.config(bg="red")
                 self.usb_device_var.set("None")
             
-            # Update active LED indicator (green when paddle or macro active, gray when idle)
-            paddle_active = hasattr(self.controller, 'paddle_ptt_active') and self.controller.paddle_ptt_active
-            macro_active = hasattr(self.controller, 'macro_active') and self.controller.macro_active
-            
-            if paddle_active or macro_active:
-                self.active_macro_indicator.config(fg="#00ff00")
+            # Radio mode indicator
+            if self.controller.tci_client:
+                mode = self.controller.tci_client.current_mode or "?"
+                self.mode_var.set(mode)
+                cw_modes = {'CW', 'CWL', 'CWU'}
+                self.mode_indicator.config(bg="green" if mode in cw_modes else "orange")
             else:
-                self.active_macro_indicator.config(fg="gray")
-            
+                self.mode_var.set("?")
+                self.mode_indicator.config(bg="gray")
+
+            # Update active LED — but don't overwrite red blocked-state set by _update_macro_led
+            if not self._macro_blocked_active:
+                paddle_active = hasattr(self.controller, 'paddle_ptt_active') and self.controller.paddle_ptt_active
+                macro_active = hasattr(self.controller, 'macro_active') and self.controller.macro_active
+                if paddle_active or macro_active:
+                    self.active_macro_indicator.config(fg="#00ff00")
+                else:
+                    self.active_macro_indicator.config(fg="gray")
+
             # Update PTT button state
             if hasattr(self.controller, 'manual_ptt_active'):
                 if self.controller.manual_ptt_active:
