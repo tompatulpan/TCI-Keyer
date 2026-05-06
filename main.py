@@ -71,6 +71,9 @@ class TCICWController:
         self.macro_active = False
         self.macro_release_task = None
         self.macro_safety_tx_release_task = None  # Fallback: release TX if macro doesn't finish
+        self.macro_confirmed = False       # Set True when first cw_mon: arrives after macro send
+        self.macro_send_time: float = None # Loop time when last macro was dispatched
+        self.macro_drop_detect_task = None # Task that fires if no cw_mon: within 500ms
         
         # Vail firmware event buffering (50ms delay to allow TX settle)
         self.vail_event_buffer = []
@@ -437,9 +440,19 @@ class TCICWController:
                         # Always clear the LED — the task may have been cancelled
                         # before it could set macro_active=False itself
                         self.macro_active = False
+                        self.macro_send_time = None
             except (ValueError, IndexError):
                 pass
-        
+
+        # Confirm macro execution — ExpertSDR3 sends cw_mon:X for each character it transmits.
+        # If we see it, the macro was not silently dropped.
+        if message.upper().startswith('CW_MON:'):
+            if not self.macro_confirmed and self.macro_send_time is not None:
+                self.macro_confirmed = True
+                if self.macro_drop_detect_task:
+                    self.macro_drop_detect_task.cancel()
+                    self.macro_drop_detect_task = None
+
         # Log interesting messages
         if message.startswith(('VFO:', 'MODULATION:', 'TRX:', 'drive:')):
             self.logger.debug(f"TCI: {message}")
@@ -516,6 +529,9 @@ class TCICWController:
         if self.macro_safety_tx_release_task:
             self.macro_safety_tx_release_task.cancel()
             self.macro_safety_tx_release_task = None
+        if self.macro_drop_detect_task:
+            self.macro_drop_detect_task.cancel()
+            self.macro_drop_detect_task = None
         
         try:
             force_ptt = self.config['tci'].get('force_ptt', False)
@@ -526,6 +542,32 @@ class TCICWController:
                 self.macro_active = False
                 mode = self.tci_client.current_mode or "unknown"
                 return f"Wrong mode ({mode})"
+
+            # Arm silent-drop detection: ExpertSDR3 drops cw_macros silently when it
+            # doesn't have application focus. We expect a cw_mon: reply within 500ms.
+            self.macro_confirmed = False
+            self.macro_send_time = asyncio.get_event_loop().time()
+
+            async def detect_silent_drop():
+                await asyncio.sleep(0.5)
+                if not self.macro_confirmed:
+                    self.logger.warning(
+                        "Macro silently dropped by ExpertSDR3 (no cw_mon: received) — "
+                        "likely app_focus:false. Try again."
+                    )
+                    print("\n[WARN] Macro not executed — ExpertSDR3 may have lost focus. Press the key again.\n")
+                    if self.tci_client and self.tci_client.ready:
+                        await self.tci_client.set_trx(False)
+                    self.macro_active = False
+                    if self.macro_safety_tx_release_task:
+                        self.macro_safety_tx_release_task.cancel()
+                        self.macro_safety_tx_release_task = None
+                    if self.macro_release_task:
+                        self.macro_release_task.cancel()
+                        self.macro_release_task = None
+                self.macro_drop_detect_task = None
+
+            self.macro_drop_detect_task = asyncio.create_task(detect_silent_drop())
 
             # Schedule GUI LED clear after 500ms (no force_ptt — radio manages TX itself)
             async def clear_macro_flag():
