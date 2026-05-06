@@ -1229,7 +1229,7 @@ async def main():
     
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="TCI CW Controller")
-    parser.add_argument('--gui', action='store_true', help="Launch with GUI")
+    parser.add_argument('--gui', action='store_true', default=True, help="Launch with GUI (default)")
     parser.add_argument('--config', default='config.yaml', help="Config file path")
     args = parser.parse_args()
     
